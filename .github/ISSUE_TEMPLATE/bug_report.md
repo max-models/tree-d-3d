@@ -22,7 +22,7 @@ assignees: ""
 
 **Environment**
 
-- template-python version:
+- tree-d-3d version:
 - Python version:
 - OS:
 

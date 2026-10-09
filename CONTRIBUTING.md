@@ -5,8 +5,8 @@ Thanks for taking the time to contribute.
 ## Set up
 
 ```bash
-git clone https://github.com/max-models/template-python.git
-cd template-python
+git clone https://github.com/max-models/tree-d-3d.git
+cd tree-d-3d
 make install          # uv sync with the dev extra and the pre-commit hooks
 ```
 
@@ -26,7 +26,7 @@ pre-commit install
 - Every public module, class and function needs a Google-style docstring. They are rendered
   in the API reference and checked by ruff's `D` rules.
 - Preview the documentation with `make docs-dev`; see the
-  [docs guide](https://max-models.github.io/template-python/development/docs/).
+  [docs guide](https://max-models.github.io/tree-d-3d/development/docs/).
 
 ## Commit messages
 
@@ -43,6 +43,6 @@ the tutorials and the documentation build. One approving review is required to m
 ## Releases
 
 Before merging a release to `main`, update the versions in `pyproject.toml`,
-`src/app/__init__.py` and `CITATION.cff` (including its release date), and add the release
+`src/tree_d_3d/__init__.py` and `CITATION.cff` (including its release date), and add the release
 notes to `CHANGELOG.md`. The push creates a GitHub release with a version tag and publishes the
 package to PyPI.
