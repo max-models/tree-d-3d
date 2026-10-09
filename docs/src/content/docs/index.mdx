@@ -1,9 +1,9 @@
 ---
 title: tree-d-3d
-description: Template repository for Python projects.
+description: Barnes-Hut trees and fast multipole methods for charged particles in a plane.
 template: splash
 hero:
-  tagline: A starting point for a Python package with tests, CI, tutorials and an Astro documentation site.
+  tagline: Barnes-Hut trees and fast multipole methods for charged particles in a plane, on NumPy, CuPy or Apple GPUs.
   actions:
     - text: Get started
       link: /tree-d-3d/getting-started/installation/
@@ -19,17 +19,17 @@ import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 ## What is included
 
 <CardGrid>
-	<Card title="Package layout" icon="open-book">
-		A `src/` layout with a console entry point, `pytest` tests and a `pyproject.toml` ready for PyPI.
+	<Card title="Flat quadtree" icon="open-book">
+		Point charges (3D Coulomb) or line charges (2D Poisson) at any targets, by Barnes-Hut tree walk or direct sum.
 	</Card>
-	<Card title="Continuous integration" icon="rocket">
-		GitHub Actions for tests, static analysis, tutorial execution, documentation and PyPI publishing.
+	<Card title="Fast multipole method" icon="rocket">
+		O(N) fields of line charges with a dual-tree traversal and complex multipole expansions.
 	</Card>
-	<Card title="Tutorials" icon="document">
-		Jupyter notebooks in `tutorials/` are executed and published as pages of this site.
+	<Card title="Simulation" icon="document">
+		Second-order time integration with a uniform magnetic field, absorbing walls and cached fields.
 	</Card>
-	<Card title="API reference" icon="setting">
-		Every module, class and function is documented from the docstrings with starlight-pydocs.
+	<Card title="Kernels" icon="setting">
+		Every kernel in Pyccel, NumPy, CUDA and Metal, with the same arguments.
 	</Card>
 </CardGrid>
 
@@ -37,7 +37,7 @@ import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 
 <CardGrid>
 	<LinkCard title="Installation" href="/tree-d-3d/getting-started/installation/" description="Create an environment and install the package." />
-	<LinkCard title="Quickstart" href="/tree-d-3d/getting-started/quickstart/" description="Run the command line entry point." />
+	<LinkCard title="Quickstart" href="/tree-d-3d/getting-started/quickstart/" description="Fields from a tree, the FMM or a direct sum, and a simulation." />
 	<LinkCard title="Tutorials" href="/tree-d-3d/tutorials/" description="Executed notebooks with their outputs." />
 	<LinkCard title="API reference" href="/tree-d-3d/api/tree_d_3d/" description="Generated from the docstrings." />
 </CardGrid>

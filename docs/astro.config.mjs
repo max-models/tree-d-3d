@@ -23,7 +23,7 @@ export default defineConfig({
 	integrations: [
 		starlight({
 			title: 'tree-d-3d',
-			description: 'Template repository for Python projects.',
+			description: 'Barnes-Hut trees and fast multipole methods for charged particles in a plane.',
 			customCss: ['katex/dist/katex.min.css', './src/styles/custom.css'],
 			components: {
 				Header: './src/components/Header.astro',

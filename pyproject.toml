@@ -6,9 +6,9 @@ requires = [ "setuptools", "wheel" ]
 [project]
 name = "tree-d-3d"
 version = "0.1.0"
-description = "Template python repository."
+description = "Barnes-Hut trees and fast multipole methods for charged particles in a plane, on NumPy, CuPy or Metal."
 readme = "README.md"
-keywords = [ "python" ]
+keywords = [ "barnes-hut", "cupy", "electrostatics", "fast multipole method", "fmm", "n-body", "plasma", "pyccel", "quadtree" ]
 license = { file = "LICENSE.txt" }
 authors = [ { name = "Max" } ]
 requires-python = ">=3.10"
@@ -19,9 +19,12 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Physics",
 ]
 dependencies = [
+  "cunumpy @ git+https://github.com/max-models/cunumpy@devel",
   "numpy",
+  "pyccel>2.0",
 ]
 
 optional-dependencies.dev = [
@@ -38,15 +41,16 @@ optional-dependencies.docs = [
   "nbclient>=0.10",
   "nbformat>=5.10",
 ]
-optional-dependencies.test = [ "pytest", "pytest-cov" ]
+optional-dependencies.gpu = [ "cupy-cuda12x" ]
+optional-dependencies.metal = [ "mlx; sys_platform == 'darwin' and platform_machine == 'arm64'" ]
+optional-dependencies.test = [ "pytest", "pytest-cov", "scipy" ]
 urls."Source" = "https://github.com/max-models/tree-d-3d"
-scripts.tree-d-3d = "tree_d_3d.main:main"
 
 [tool.setuptools.packages.find]
 where = [ "src" ]
 
 [tool.setuptools.package-data]
-"*" = [ "py.typed" ]
+"*" = [ "*.cu", "*.cuh", "py.typed" ]  # CUDA sources are compiled at run time
 
 [tool.ruff]
 target-version = "py310"
@@ -56,15 +60,22 @@ extend-include = [ "*.ipynb" ]
 [tool.ruff.lint]
 # pycodestyle, pyflakes, isort, pyupgrade, bugbear and pydocstyle
 select = [ "B", "D", "E", "F", "I", "UP", "W" ]
-ignore = [ "E501" ] # line length is handled by the formatter
+# E501: the formatter handles line length. B905: zip() over equal-length arrays.
+# D102, D107, D417: short methods and constructors documented on the class.
+ignore = [ "B905", "D102", "D105", "D107", "D417", "E501" ]
 pydocstyle.convention = "google"
-per-file-ignores."**/tests/**" = [ "D" ]
+per-file-ignores."**/tests/**" = [ "D", "E402" ]
 per-file-ignores."*.ipynb" = [ "D" ]
 per-file-ignores."docs/tools/*" = [ "D" ]
+# kernel bodies follow the Pyccel/CUDA argument lists, not docstring conventions
+per-file-ignores."src/tree_d_3d/kernels/*/*" = [ "D", "E741" ]
 
 [tool.pyright]
 include = [ "src" ]
-exclude = [ "**/tests" ]
+venvPath = "."
+venv = ".venv"
+# the Pyccel kernels use Pyccel annotations (float[:], int64)
+exclude = [ "**/tests", "src/tree_d_3d/kernels/*/*_pyccel.py" ]
 pythonVersion = "3.10"
 typeCheckingMode = "standard"
 

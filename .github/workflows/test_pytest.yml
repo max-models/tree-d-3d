@@ -31,6 +31,14 @@ jobs:
       - name: Install project
         run: uv sync --extra test
 
+      # the Pyccel kernels, compiled on first use, keyed on their sources
+      - name: Cache compiled kernels
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/tree-d-3d/kernels
+          key: tree-d-3d-kernels-${{ runner.os }}-py${{ matrix.python-version }}-${{ hashFiles('src/tree_d_3d/kernels/*/*_pyccel.py') }}
+          restore-keys: tree-d-3d-kernels-${{ runner.os }}-py${{ matrix.python-version }}-
+
       - name: Run tests with coverage
         run: uv run pytest --cov --cov-report=xml --cov-report=term .
 
