@@ -147,6 +147,7 @@ def test_fmm_chain_m2l_downward_evaluate(system, tree):
             tree.moment_re,
             tree.moment_im,
             binomial,
+            0,
             scratch,
             scratch.copy(),
             re,

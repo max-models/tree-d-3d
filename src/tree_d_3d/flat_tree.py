@@ -294,6 +294,7 @@ class FlatQuadtree:
         compiled: bool = True,
         kernel: str = "coulomb",
         order: int = 12,
+        symmetric: bool = False,
     ) -> None:
         if kernel not in _KERNELS:
             raise ValueError(f"kernel must be one of {_KERNELS}")
@@ -303,6 +304,8 @@ class FlatQuadtree:
             raise ValueError(f"order must be at most {MAX_ORDER}, got {order}")
         self.kernel = kernel
         self.order = int(order)
+        #: FMM translations truncated by total degree (exact pair antisymmetry).
+        self.symmetric = bool(symmetric)
         self._compiled = bool(compiled)
         # the active backend's arrays; NumPy for the uncompiled (Python) kernels
         self._xp = xp if compiled else np
@@ -536,6 +539,7 @@ class FlatQuadtree:
             self.moment_re,
             self.moment_im,
             binomial,
+            1 if self.symmetric else 0,
             scratch_re,
             scratch_im,
             local_re,

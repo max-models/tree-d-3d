@@ -25,6 +25,7 @@ dependencies = [
   "cunumpy @ git+https://github.com/max-models/cunumpy@devel",
   "numpy",
   "pyccel>2.0",
+  "scipy",
 ]
 
 optional-dependencies.dev = [
@@ -33,8 +34,9 @@ optional-dependencies.dev = [
   "pyproject-fmt",
   "pyright",
   "ruff",
-  "tree-d-3d[test,docs]",
+  "tree-d-3d[test,docs,examples]",
 ]
+optional-dependencies.examples = [ "matplotlib" ]
 optional-dependencies.docs = [
   "griffe",
   "ipykernel",
@@ -43,7 +45,7 @@ optional-dependencies.docs = [
 ]
 optional-dependencies.gpu = [ "cupy-cuda12x" ]
 optional-dependencies.metal = [ "mlx; sys_platform == 'darwin' and platform_machine == 'arm64'" ]
-optional-dependencies.test = [ "pytest", "pytest-cov", "scipy" ]
+optional-dependencies.test = [ "pytest", "pytest-cov" ]
 urls."Source" = "https://github.com/max-models/tree-d-3d"
 
 [tool.setuptools.packages.find]

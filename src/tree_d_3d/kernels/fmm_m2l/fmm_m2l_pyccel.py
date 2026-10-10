@@ -21,6 +21,7 @@ def fmm_m2l(
     moment_re: "float[:,:]",
     moment_im: "float[:,:]",
     binomial: "float[:,:]",
+    symmetric: int,
     inv_re: "float[:]",
     inv_im: "float[:]",
     local_re: "float[:,:]",
@@ -28,12 +29,16 @@ def fmm_m2l(
 ) -> None:
     """Add each pair's multipole of one cell to the other's local expansion.
 
-    ``inv_re``/``inv_im`` are scratch buffers of length 2 p + 2.
+    ``symmetric`` nonzero truncates the translated series by total degree
+    (``k + l <= p``, Dehnen's symmetric truncation) instead of ``k <= p`` and
+    ``l <= p``: the pair interaction then depends on ``z_i - z_j`` only, so the
+    forces of a mutual pair are exactly antisymmetric. ``inv_re``/``inv_im`` are
+    scratch buffers of length 2 p + 2.
     """
     order = moment_re.shape[1] - 1
     # pairs are independent; the local expansions are shared, so they are updated atomically
     # fmt: off
-    #$ omp parallel for firstprivate(pw_re, pw_im) private(direction, t_re, t_im, t2, w_re, w_im, k, a0_re, a0_im, log_re, log_im, b_re, b_im, sign, l, src, dst, ak_re, ak_im, s_re, s_im, term_re, term_im, c, pw_re_ptr, pw_im_ptr) schedule(dynamic, 64)
+    #$ omp parallel for firstprivate(pw_re, pw_im) private(direction, t_re, t_im, t2, w_re, w_im, k, kmax, a0_re, a0_im, log_re, log_im, b_re, b_im, sign, l, src, dst, ak_re, ak_im, s_re, s_im, term_re, term_im, c, pw_re_ptr, pw_im_ptr) schedule(dynamic, 64)
     # fmt: on
     for pair in range(count):
         pw_re = np.empty(2 * order + 2, dtype=float)
@@ -83,7 +88,10 @@ def fmm_m2l(
                 sign = -sign
                 s_re = 0.0
                 s_im = 0.0
-                for k in range(1, order + 1):
+                kmax = order
+                if symmetric != 0:
+                    kmax = order - l
+                for k in range(1, kmax + 1):
                     c = binomial[k + l - 1, l] / k
                     ak_re = moment_re[src, k] * c
                     ak_im = moment_im[src, k] * c

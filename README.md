@@ -25,6 +25,9 @@ plane, on NumPy, CuPy or the Apple GPU. Extracted from
 - `ElectrostaticSimulation`: time integration of `ChargedBody`
   particles, second order, with a uniform magnetic field `B_z`,
   absorbing walls and cached fields (one field evaluation per step).
+- `GroundedStripField`: line charges between two grounded plates, by
+  conformal mapping and the FMM, including the image force of the
+  plates.
 - `ReferenceQuadtree`: a readable object tree computing the same as the
   flat tree.
 - `tree_d_3d.gravity`: the classic gravitational Barnes-Hut N-body code.
@@ -93,6 +96,22 @@ print(sim.get_total_energy())
 
 On the CuPy backend (`cunumpy.use_backend("cupy")`) the trees and direct
 sums take and return CuPy arrays and run the CUDA kernels.
+
+## Example
+
+`examples/conserving_tree_code.py` (needs `tree-d-3d[examples]`,
+i.e. matplotlib) runs the experiments behind `tree_d_3d.smooth`, a tree
+code whose forces are the exact gradient of a smooth energy and exactly
+antisymmetric: symmetric M2L truncation against the standard one, the
+smooth partition of unity on the adaptive leaves, a finite-difference
+gradient check, and energy and momentum over a Verlet run. It writes
+eight figures and three GIF animations (the trapped cloud with its
+energy error, the orbits of a ring of like charges over the direct sum,
+and a tracer’s smooth leaf membership) to `examples/output/`.
+`examples/conserving_tree_code_studies.py` adds seven parameter studies
+(softening kernels, the weight function, band width, cost at matched
+accuracy, a long run, an error map, the size of the exact-gradient
+correction).
 
 ## Development
 

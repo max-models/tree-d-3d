@@ -174,3 +174,8 @@ junit/
 # Quarto
 .quarto/
 README_files/
+
+# written by a local tool
+stc.lock
+# figures of the example scripts
+examples/output/

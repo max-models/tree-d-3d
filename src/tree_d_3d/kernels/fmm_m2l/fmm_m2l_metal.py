@@ -23,6 +23,7 @@ _SOURCE = """
     if (pair >= pairs_shape[0]) return;
     int order = (int)moment_re_shape[1] - 1;
     int width = order + 1;
+    int sym = (int)symmetric[0];
     float powers_re[2 * TREE_D_3D_MAX_ORDER + 2];
     float powers_im[2 * TREE_D_3D_MAX_ORDER + 2];
     for (int direction = 0; direction < 2; ++direction) {
@@ -55,7 +56,8 @@ _SOURCE = """
         for (int l = 1; l <= order; ++l) {
             sign = -sign;
             float s_re = 0.0f, s_im = 0.0f;
-            for (int k = 1; k <= order; ++k) {
+            int kmax = sym != 0 ? order - l : order;
+            for (int k = 1; k <= kmax; ++k) {
                 float c = binomial[(k + l - 1) * binomial_shape[1] + l] / (float)k;
                 float ak_re = moment_re[src * width + k] * c;
                 float ak_im = moment_im[src * width + k] * c;
@@ -75,7 +77,7 @@ _SOURCE = """
 _KERNEL = make_atomic_kernel(
     "tree_d_3d_fmm_m2l",
     _SOURCE,
-    inputs=["pairs", "node_center", "moment_re", "moment_im", "binomial"],
+    inputs=["pairs", "node_center", "moment_re", "moment_im", "binomial", "symmetric"],
     outputs=["local_re_delta", "local_im_delta"],
     header=_HEADER,
 )
@@ -88,12 +90,16 @@ def fmm_m2l(
     moment_re: Array,
     moment_im: Array,
     binomial: Array,
+    symmetric: int,
     inv_re: Array,
     inv_im: Array,
     local_re: Array,
     local_im: Array,
 ) -> None:
-    """Add each pair's multipole of one cell to the other's local expansion."""
+    """Add each pair's multipole of one cell to the other's local expansion.
+
+    ``symmetric`` nonzero truncates by total degree (see the Pyccel version).
+    """
     if not count:
         return
     local_re_delta = np.zeros(local_re.shape)
@@ -104,6 +110,7 @@ def fmm_m2l(
         moment_re,
         moment_im,
         binomial,
+        int(symmetric),
         out=(local_re_delta, local_im_delta),
         n_threads=int(count),
     )

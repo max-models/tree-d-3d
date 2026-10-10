@@ -22,7 +22,7 @@ serial, `OMP_NUM_THREADS` limits the threads.
 | ------- | --------------------------------------------------------- |
 | `gpu`   | CuPy, for the CUDA kernels                                |
 | `metal` | MLX, for the Metal kernels on Apple-silicon Macs          |
-| `test`  | `pytest`, `coverage` and SciPy                            |
+| `test`  | `pytest` and `coverage`                                   |
 | `docs`  | the notebook runner and griffe for the API reference      |
 | `dev`   | formatters and linters, plus the `test` and `docs` extras |
 

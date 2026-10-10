@@ -1,7 +1,8 @@
 // The CUDA version (GPU) of the fmm_m2l kernel; fmm_m2l_pyccel.py next to this file is
 // the Pyccel version (CPU), with the same arguments.  Launch with n_threads=count: one
 // thread per cell pair, translating both ways and adding to the local expansions
-// atomically.  The powers of 1/t live in local memory (inv_re/inv_im are the CPU's
+// atomically.  symmetric != 0 truncates by total degree k + l <= p (exactly
+// antisymmetric pair forces).  The powers of 1/t live in local memory (inv_re/inv_im are the CPU's
 // scratch and unused here), for orders up to TREE_D_3D_MAX_ORDER.
 
 #include "cunumpy/array_view.cuh"
@@ -16,6 +17,7 @@ void fmm_m2l(
     Array2D<double> moment_re,
     Array2D<double> moment_im,
     Array2D<double> binomial,
+    long long symmetric,
     Array1D<double> inv_re,
     Array1D<double> inv_im,
     Array2D<double> local_re,
@@ -61,7 +63,8 @@ void fmm_m2l(
         for (long long l = 1; l <= order; ++l) {
             sign = -sign;  // (-1)**l
             double s_re = 0.0, s_im = 0.0;
-            for (long long k = 1; k <= order; ++k) {
+            const long long kmax = symmetric != 0 ? order - l : order;
+            for (long long k = 1; k <= kmax; ++k) {
                 const double c = binomial(k + l - 1, l) / k;
                 const double ak_re = moment_re(src, k) * c;
                 const double ak_im = moment_im(src, k) * c;

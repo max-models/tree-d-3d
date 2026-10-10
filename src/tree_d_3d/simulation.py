@@ -184,6 +184,7 @@ class ElectrostaticSimulation:
         kernel: str = "coulomb",
         order: int = 18,
         reference_radius: float = 1.0,
+        symmetric: bool = False,
     ) -> None:
         self.bodies = list(bodies)
         if len({id(b) for b in self.bodies}) != len(self.bodies):
@@ -196,6 +197,7 @@ class ElectrostaticSimulation:
             max_depth=max_depth,
             kernel=kernel,
             order=order,
+            symmetric=symmetric,
         )
         if method not in _METHODS:
             raise ValueError(f"method must be one of {_METHODS}")
@@ -205,6 +207,8 @@ class ElectrostaticSimulation:
             raise ValueError("method='fmm' needs 0 < theta < 1")
         self.kernel = kernel
         self.order = int(order)
+        #: symmetric FMM truncation: exactly antisymmetric pair forces (``kernel="log"``).
+        self.symmetric = bool(symmetric)
         self.reference_radius = _finite(
             "reference_radius", reference_radius, positive=True
         )
@@ -364,6 +368,7 @@ class ElectrostaticSimulation:
             max_depth=self.max_depth,
             kernel=self.kernel,
             order=self.order,
+            symmetric=self.symmetric,
         )
 
     def _line_offset(self, targets: np.ndarray) -> np.ndarray:

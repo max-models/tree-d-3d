@@ -6,6 +6,8 @@
 * :class:`ElectrostaticSimulation`: time integration of :class:`ChargedBody`
   particles with an optional uniform magnetic field and absorbing walls.
 * :class:`ReferenceQuadtree`: a readable object tree computing the same as the flat tree.
+* :class:`GroundedStripField`: line charges between two grounded plates, by
+  conformal mapping and the FMM.
 * :mod:`tree_d_3d.gravity`: the classic gravitational Barnes-Hut N-body code.
 
 The compiled kernels are in :mod:`tree_d_3d.kernels`.
@@ -18,6 +20,7 @@ from tree_d_3d.kernels import kernels_compiled
 from tree_d_3d.quad import Quad
 from tree_d_3d.reference import ReferenceNode, ReferenceQuadtree
 from tree_d_3d.simulation import AbsorbedParticles, ElectrostaticSimulation
+from tree_d_3d.strip import GroundedStripField
 
 __version__ = "0.1.0"  # x-release-please-version
 
@@ -28,6 +31,7 @@ __all__ = [
     "ElectrostaticSimulation",
     "FlatNode",
     "FlatQuadtree",
+    "GroundedStripField",
     "Quad",
     "ReferenceNode",
     "ReferenceQuadtree",

@@ -173,3 +173,15 @@ def test_uniform_cylinder_explodes_self_similarly():
     rms = np.sqrt(np.mean(np.sum(sim.positions**2, axis=0)) / np.mean(r**2))
     assert rms / s - 1 == pytest.approx(0, abs=1e-3)
     assert abs(sim.get_total_energy(exact=True) / energy - 1) < 1e-4
+
+
+def test_symmetric_truncation_conserves_momentum_to_roundoff():
+    pos, q = cloud(6000, seed=3)
+    tree = FlatQuadtree(pos, q, Quad(0, 0, 1), kernel="log", order=18, symmetric=True)
+    _, field = tree.fmm(theta=0.5)
+    force = q * field
+    assert np.abs(force.sum(axis=1)).max() < 1e-15 * np.abs(force).sum()
+    # same leading error order as the rectangle truncation, larger constant
+    ref_phi, ref_field = reference(pos, q)
+    rect = FlatQuadtree(pos, q, Quad(0, 0, 1), kernel="log", order=18).fmm(theta=0.5)[1]
+    assert relative(rect, ref_field) < relative(field, ref_field) < 1e-6

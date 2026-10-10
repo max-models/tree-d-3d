@@ -383,6 +383,7 @@ def test_fmm_pipeline(tmp_path, system, log_tree):
         moments["moment_re"],
         moments["moment_im"],
         binomial,
+        0,
         *scratch.values(),
         *expected.values(),
     )
@@ -396,7 +397,12 @@ def test_fmm_pipeline(tmp_path, system, log_tree):
         **local,
     }
     results = _cuda(
-        tmp_path / "m", "fmm_m2l", arrays, {"count": n_m2l}, n_m2l, list(local)
+        tmp_path / "m",
+        "fmm_m2l",
+        arrays,
+        {"count": n_m2l, "symmetric": 0},
+        n_m2l,
+        list(local),
     )
     for name, result in zip(local, results):
         np.testing.assert_allclose(
