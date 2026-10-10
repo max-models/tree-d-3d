@@ -1,0 +1,93 @@
+---
+// An interactive Plotly chart from a pre-exported figure JSON under public/ (written by an
+// example's `plasma_plots.save_figure(...)` and copied there by docs/tools/examples.py).
+// See src/lib/plotly-figures.ts.
+export interface Props {
+	/** Site-root-relative path of the figure JSON under public/, e.g. "/examples/conserving-tree-code/cloud.plotly.json". */
+	src: string;
+	/** CSS height of the chart. */
+	height?: string;
+	/** Accessible description of the figure. */
+	title?: string;
+	/** Draw right away instead of when scrolled into view. */
+	eager?: boolean;
+}
+const { src, height = '460px', title = 'Interactive figure', eager = false } = Astro.props;
+// public/ files are served under the base path (/picnic/...), which plain string props don't know.
+const resolvedSrc = import.meta.env.BASE_URL.replace(/\/$/, '') + src;
+---
+
+<div
+	class="plotly-chart"
+	data-plotly-figure
+	data-plot-src={resolvedSrc}
+	data-eager={eager ? 'true' : undefined}
+	role="img"
+	aria-label={title}
+	aria-busy="true"
+	style={`height: ${height}`}
+>
+	<p class="plot-status" data-plot-status>Loading interactive figure…</p>
+	<button class="plot-play" data-plot-play hidden type="button" aria-label="Play animation">
+		<span aria-hidden="true">▶</span> <span data-plot-play-label>Play</span>
+	</button>
+	<button class="plot-replay" data-plot-replay hidden type="button" aria-pressed="false">
+		<span aria-hidden="true">↻</span> Replay
+	</button>
+</div>
+
+<script>
+	import { mountPlotlyFigures } from '../lib/plotly-figures';
+
+	mountPlotlyFigures();
+	document.addEventListener('astro:page-load', mountPlotlyFigures);
+</script>
+
+<style>
+	.plotly-chart {
+		position: relative;
+		width: 100%;
+		margin-block: 1.5rem;
+	}
+	.plotly-chart.plot-error,
+	.plot-status {
+		display: grid;
+		place-items: center;
+		height: 100%;
+		margin: 0;
+		color: var(--sl-color-gray-3);
+		font-size: var(--sl-text-sm);
+	}
+	.plotly-chart :global(.plot-play),
+	.plotly-chart :global(.plot-replay) {
+		position: absolute;
+		z-index: 2;
+		left: 1rem;
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		padding: 0.45rem 0.9rem;
+		border-radius: 999px;
+		cursor: pointer;
+		font: 650 var(--sl-text-xs) var(--sl-font);
+	}
+	.plotly-chart :global(.plot-play) {
+		bottom: 3.2rem;
+		border: 1px solid var(--sl-color-text-accent);
+		background: var(--sl-color-text-accent);
+		color: var(--sl-color-text-invert);
+	}
+	.plotly-chart :global(.plot-replay) {
+		bottom: 1rem;
+		border: 1px solid var(--sl-color-hairline-light);
+		background: var(--sl-color-bg);
+		color: var(--sl-color-white);
+	}
+	.plotly-chart :global(.plot-replay[aria-pressed='true']) {
+		border-color: var(--sl-color-text-accent);
+		color: var(--sl-color-text-accent);
+	}
+	.plotly-chart :global([hidden]) {
+		display: none !important;
+	}
+</style>

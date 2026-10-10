@@ -97,16 +97,19 @@ return CuPy arrays and run the CUDA kernels.
 
 ## Example
 
-`examples/conserving_tree_code.py` (needs `tree-d-3d[examples]`, i.e. matplotlib) runs the
-experiments behind `tree_d_3d.smooth`, a tree code whose forces are the exact gradient of a
-smooth energy and exactly antisymmetric: symmetric M2L truncation against the standard one,
-the smooth partition of unity on the adaptive leaves, a finite-difference gradient check, and
-energy and momentum over a Verlet run. It writes eight figures and three GIF animations
-(the trapped cloud with its energy error, the orbits of a ring of like charges over the direct
-sum, and a tracer's smooth leaf membership) to `examples/output/`.
+`examples/conserving_tree_code.py` (needs `tree-d-3d[examples]`, i.e. Plotly through
+`plasma-plots`) runs the experiments behind `tree_d_3d.smooth`, a tree code whose forces are
+the exact gradient of a smooth energy and exactly antisymmetric: symmetric M2L truncation
+against the standard one, the smooth partition of unity on the adaptive leaves, a
+finite-difference gradient check, and energy and momentum over a Verlet run. It writes eight
+figures and four interactive animations (the trapped cloud with its energy error, the orbits
+of a ring of like charges over the direct sum, a tracer's smooth leaf membership, and the
+quadtree rebuilt every frame while the particles move) to `examples/output/`.
 `examples/conserving_tree_code_studies.py` adds seven parameter studies (softening kernels,
 the weight function, band width, cost at matched accuracy, a long run, an error map, the size
 of the exact-gradient correction).
+`examples/rational_far_field.py` tests rational (AAA) far fields with equivalent charges at free
+positions against the multipole series, cell by cell and up a tree: a documented negative result.
 
 ## Development
 

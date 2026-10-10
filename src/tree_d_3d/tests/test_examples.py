@@ -21,48 +21,104 @@ def _load(name: str):
 
 
 @pytest.mark.skipif(
-    importlib.util.find_spec("matplotlib") is None, reason="matplotlib not installed"
+    importlib.util.find_spec("plotly") is None, reason="plotly not installed"
 )
 def test_conserving_tree_code_example_writes_its_figures(tmp_path):
-    import matplotlib
-
-    matplotlib.use("Agg")
     example = _load("conserving_tree_code")
     output = example.main(["--quick", "--output", str(tmp_path)])
-    assert {p.name for p in output.glob("*.gif")} == {
-        "cloud.gif",
-        "orbits.gif",
-        "membership.gif",
-    }
-    names = {p.name for p in output.glob("*.png")}
+    names = {p.name for p in output.glob("*.plotly.json")}
     assert names == {
-        "truncation_accuracy.png",
-        "truncation_momentum.png",
-        "partition_of_unity.png",
-        "gradient_check.png",
-        "energy_drift.png",
-        "momentum_drift.png",
-        "trajectories.png",
-        "trajectories_gentle.png",
+        f"{stem}.plotly.json"
+        for stem in (
+            "truncation_accuracy",
+            "truncation_momentum",
+            "partition_of_unity",
+            "gradient_check",
+            "energy_drift",
+            "momentum_drift",
+            "trajectories",
+            "trajectories_gentle",
+            "cloud",
+            "orbits",
+            "membership",
+            "tree",
+        )
     }
 
 
 @pytest.mark.skipif(
-    importlib.util.find_spec("matplotlib") is None, reason="matplotlib not installed"
+    importlib.util.find_spec("plotly") is None, reason="plotly not installed"
 )
 def test_studies_example_writes_its_figures(tmp_path):
-    import matplotlib
-
-    matplotlib.use("Agg")
     example = _load("conserving_tree_code_studies")
     output = example.main(["--quick", "--output", str(tmp_path)])
-    names = {p.name for p in output.glob("*.png")}
+    names = {p.name for p in output.glob("*.plotly.json")}
     assert names == {
-        "kernels.png",
-        "weights.png",
-        "band_study.png",
-        "cost_matched.png",
-        "long_run.png",
-        "error_map.png",
-        "correction_term.png",
+        f"{stem}.plotly.json"
+        for stem in (
+            "kernels",
+            "weights",
+            "band_study",
+            "cost_matched",
+            "long_run",
+            "error_map",
+            "correction_term",
+        )
+    }
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("plotly") is None, reason="plotly not installed"
+)
+def test_barnes_hut_tree_example_writes_its_figures(tmp_path):
+    example = _load("barnes_hut_tree")
+    output = example.main(["--quick", "--output", str(tmp_path)])
+    names = {p.name for p in output.glob("*.plotly.json")}
+    assert names == {
+        f"{stem}.plotly.json"
+        for stem in (
+            "tree_boxes",
+            "opening_criterion",
+            "theta_tradeoff",
+            "scaling",
+            "cluster_merge",
+        )
+    }
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("plotly") is None, reason="plotly not installed"
+)
+def test_fmm_scaling_example_writes_its_figures(tmp_path):
+    example = _load("fmm_scaling")
+    output = example.main(["--quick", "--output", str(tmp_path)])
+    names = {p.name for p in output.glob("*.plotly.json")}
+    assert names == {
+        f"{stem}.plotly.json"
+        for stem in (
+            "order_accuracy",
+            "theta_accuracy",
+            "interaction_counts",
+            "scaling",
+            "interaction_list",
+        )
+    }
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("plotly") is None, reason="plotly not installed"
+)
+def test_rational_far_field_example_writes_its_figures(tmp_path):
+    example = _load("rational_far_field")
+    output = example.main(["--quick", "--output", str(tmp_path)])
+    names = {p.name for p in output.glob("*.plotly.json")}
+    assert names == {
+        f"{stem}.plotly.json"
+        for stem in (
+            "cell_accuracy",
+            "cluster_size",
+            "fit_validity",
+            "hierarchical",
+            "pair_counts",
+        )
     }

@@ -1,11 +1,12 @@
 # Development environment (uv), README (Quarto) and the documentation site (docs/, Astro + Starlight).
-# Notebook tool: docs/tools/notebooks.py.
+# Notebook tool: docs/tools/notebooks.py. Example-gallery tool: docs/tools/examples.py.
 PYTHON ?= .venv/bin/python
 NOTEBOOKS = $(PYTHON) docs/tools/notebooks.py
+EXAMPLES = $(PYTHON) docs/tools/examples.py
 DOCS_ENV = DOCS_PYTHON=$(shell $(PYTHON) -c "import sys; print(sys.executable)")
 FORCE ?=
 
-.PHONY: help install test lint readme readme-check docs-install docs-notebooks docs-dev docs-build docs-preview docs-clean
+.PHONY: help install test lint readme readme-check docs-install docs-notebooks docs-examples docs-dev docs-build docs-preview docs-clean
 
 help:  ## list the targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-16s %s\n", $$1, $$2}'
@@ -37,12 +38,18 @@ docs-notebooks:  ## execute the changed tutorials and convert all of them (FORCE
 	$(NOTEBOOKS) execute $(if $(FORCE),--force,)
 	$(NOTEBOOKS) convert
 
+docs-examples:  ## run the changed examples (--quick) and convert all of them (FORCE=1 reruns all)
+	$(EXAMPLES) run $(if $(FORCE),--force,)
+	$(EXAMPLES) convert
+
 docs-dev:  ## live preview at http://localhost:4321/tree-d-3d/
 	$(NOTEBOOKS) convert
+	$(EXAMPLES) convert
 	cd docs && $(DOCS_ENV) DOCS_VALIDATE_LINKS=false npm run dev
 
 docs-build:  ## the static site in docs/dist, as in CI
 	$(NOTEBOOKS) convert
+	$(EXAMPLES) convert
 	cd docs && npm run check:mdx && $(DOCS_ENV) npm run build
 
 docs-preview:  ## serve docs/dist
@@ -50,4 +57,5 @@ docs-preview:  ## serve docs/dist
 
 docs-clean:  ## remove generated pages, assets and build output
 	$(NOTEBOOKS) clean
+	$(EXAMPLES) clean
 	rm -rf docs/dist docs/.astro

@@ -36,12 +36,13 @@ optional-dependencies.dev = [
   "ruff",
   "tree-d-3d[test,docs,examples]",
 ]
-optional-dependencies.examples = [ "matplotlib" ]
+optional-dependencies.examples = [ "plasma-plots[plotly]" ]
 optional-dependencies.docs = [
   "griffe",
   "ipykernel",
   "nbclient>=0.10",
   "nbformat>=5.10",
+  "tree-d-3d[examples]",
 ]
 optional-dependencies.gpu = [ "cupy-cuda12x" ]
 optional-dependencies.metal = [ "mlx; sys_platform == 'darwin' and platform_machine == 'arm64'" ]
@@ -71,6 +72,8 @@ per-file-ignores."*.ipynb" = [ "D" ]
 per-file-ignores."docs/tools/*" = [ "D" ]
 # kernel bodies follow the Pyccel/CUDA argument lists, not docstring conventions
 per-file-ignores."src/tree_d_3d/kernels/*/*" = [ "D", "E741" ]
+# research study scripts, kept as run (see the Obsidian note on rational far fields)
+per-file-ignores."benchmarks/rational_far_field*.py" = [ "B023", "D", "E702", "E731", "UP034" ]
 
 [tool.pyright]
 include = [ "src" ]
