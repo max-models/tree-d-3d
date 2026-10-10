@@ -8,6 +8,8 @@
 * :class:`ReferenceQuadtree`: a readable object tree computing the same as the flat tree.
 * :class:`GroundedStripField`: line charges between two grounded plates, by
   conformal mapping and the FMM.
+* :class:`BoundaryIntegralElectrodes`: conductors at prescribed potentials, by the
+  single-layer boundary-integral (panel) method.
 * :mod:`tree_d_3d.gravity`: the classic gravitational Barnes-Hut N-body code.
 
 The compiled kernels are in :mod:`tree_d_3d.kernels`.
@@ -15,6 +17,7 @@ The compiled kernels are in :mod:`tree_d_3d.kernels`.
 
 from tree_d_3d.bodies import ChargedBody
 from tree_d_3d.constants import K_E
+from tree_d_3d.electrodes import BoundaryIntegralElectrodes, Conductor, circle_vertices
 from tree_d_3d.flat_tree import FlatNode, FlatQuadtree, direct_field
 from tree_d_3d.kernels import kernels_compiled
 from tree_d_3d.quad import Quad
@@ -27,7 +30,9 @@ __version__ = "0.1.0"  # x-release-please-version
 __all__ = [
     "K_E",
     "AbsorbedParticles",
+    "BoundaryIntegralElectrodes",
     "ChargedBody",
+    "Conductor",
     "ElectrostaticSimulation",
     "FlatNode",
     "FlatQuadtree",
@@ -35,6 +40,7 @@ __all__ = [
     "Quad",
     "ReferenceNode",
     "ReferenceQuadtree",
+    "circle_vertices",
     "direct_field",
     "kernels_compiled",
 ]

@@ -331,10 +331,17 @@ def plot_partition_of_unity(output: Path) -> None:
         )
     c, h = tree.center[middle], tree.half[middle]
     fig.update_xaxes(
-        range=[c.real - 4 * h, c.real + 4 * h], scaleanchor="y", row=1, col=1
+        range=[c.real - 4 * h, c.real + 4 * h],
+        scaleanchor="y",
+        showgrid=False,
+        row=1,
+        col=1,
     )
-    fig.update_yaxes(range=[c.imag - 4 * h, c.imag + 4 * h], row=1, col=1)
-    fig.update_xaxes(scaleanchor="y2", row=1, col=2)
+    fig.update_yaxes(
+        range=[c.imag - 4 * h, c.imag + 4 * h], showgrid=False, row=1, col=1
+    )
+    fig.update_xaxes(scaleanchor="y2", showgrid=False, row=1, col=2)
+    fig.update_yaxes(showgrid=False, row=1, col=2)
     fig.add_annotation(
         text=f"max |Σw − 1| = {np.abs(total - 1).max():.1e}",
         x=-0.95,
@@ -627,8 +634,8 @@ def plot_trajectories(results, info, output: Path) -> None:
         row=1,
         col=1,
     )
-    fig.update_xaxes(range=[-1.3, 1.3], scaleanchor="y", row=1, col=1)
-    fig.update_yaxes(range=[-1.3, 1.3], row=1, col=1)
+    fig.update_xaxes(range=[-1.3, 1.3], scaleanchor="y", showgrid=False, row=1, col=1)
+    fig.update_yaxes(range=[-1.3, 1.3], showgrid=False, row=1, col=1)
 
     for label, color, times, _, _, hist in results[1:]:
         distance = np.sqrt(((hist - reference) ** 2).sum(axis=1)).max(axis=1)
@@ -731,8 +738,8 @@ def plot_gentle_trajectories(output: Path, steps: int = 2000):
         row=1,
         col=1,
     )
-    fig.update_xaxes(range=[-1.5, 1.5], scaleanchor="y", row=1, col=1)
-    fig.update_yaxes(range=[-1.5, 1.5], row=1, col=1)
+    fig.update_xaxes(range=[-1.5, 1.5], scaleanchor="y", showgrid=False, row=1, col=1)
+    fig.update_yaxes(range=[-1.5, 1.5], showgrid=False, row=1, col=1)
 
     fig.add_trace(
         go.Scatter(
@@ -803,8 +810,8 @@ def animate_cloud(results, info, output: Path, frames: int = 160) -> None:
         row=1,
         col=1,
     )
-    fig.update_xaxes(range=[-1.3, 1.3], scaleanchor="y", row=1, col=1)
-    fig.update_yaxes(range=[-1.3, 1.3], row=1, col=1)
+    fig.update_xaxes(range=[-1.3, 1.3], scaleanchor="y", showgrid=False, row=1, col=1)
+    fig.update_yaxes(range=[-1.3, 1.3], showgrid=False, row=1, col=1)
 
     for _, col_, t_, d_, _, _ in results:
         fig.add_trace(
@@ -899,8 +906,8 @@ def animate_orbits(
             showlegend=False,
         )
     )
-    fig.update_xaxes(range=[-1.2, 1.2], scaleanchor="y")
-    fig.update_yaxes(range=[-1.2, 1.2])
+    fig.update_xaxes(range=[-1.2, 1.2], scaleanchor="y", showgrid=False)
+    fig.update_yaxes(range=[-1.2, 1.2], showgrid=False)
 
     frame_list = []
     for k in idx:
@@ -1004,8 +1011,8 @@ def animate_membership(output: Path, frames: int = 150) -> None:
         row=1,
         col=2,
     )
-    fig.update_xaxes(range=[-0.75, 0.75], scaleanchor="y", row=1, col=1)
-    fig.update_yaxes(range=[-0.45, 0.6], row=1, col=1)
+    fig.update_xaxes(range=[-0.75, 0.75], scaleanchor="y", showgrid=False, row=1, col=1)
+    fig.update_yaxes(range=[-0.45, 0.6], showgrid=False, row=1, col=1)
     fig.update_yaxes(
         range=[0, 1.05], title_text="weight w_L of the tracer in leaf L", row=1, col=2
     )
@@ -1105,8 +1112,8 @@ def animate_tree(
         row=1,
         col=1,
     )
-    fig.update_xaxes(range=[-1.6, 1.6], scaleanchor="y", row=1, col=1)
-    fig.update_yaxes(range=[-1.6, 1.6], row=1, col=1)
+    fig.update_xaxes(range=[-1.6, 1.6], scaleanchor="y", showgrid=False, row=1, col=1)
+    fig.update_yaxes(range=[-1.6, 1.6], showgrid=False, row=1, col=1)
     fig.add_trace(
         go.Scatter(
             x=[],

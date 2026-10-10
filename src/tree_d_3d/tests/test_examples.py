@@ -122,3 +122,94 @@ def test_rational_far_field_example_writes_its_figures(tmp_path):
             "pair_counts",
         )
     }
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("plotly") is None, reason="plotly not installed"
+)
+def test_implicit_push_example_writes_its_figures(tmp_path):
+    example = _load("implicit_push")
+    output = example.main(["--quick", "--output", str(tmp_path)])
+    names = {p.name for p in output.glob("*.plotly.json")}
+    assert names == {
+        f"{stem}.plotly.json" for stem in ("energy", "cost", "kinetic", "convergence")
+    }
+
+
+def test_boltzmann_tree_example_writes_its_figures(tmp_path):
+    example = _load("boltzmann_tree")
+    output = example.main(["--smoke", "--output", str(tmp_path)])
+    names = {p.name for p in output.glob("*.plotly.json")}
+    assert names == {
+        f"{stem}.plotly.json"
+        for stem in ("profiles", "iterations", "convergence", "leaves")
+    }
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("plotly") is None, reason="plotly not installed"
+)
+def test_plasma_sheath_example_writes_its_figures(tmp_path):
+    example = _load("plasma_sheath")
+    output = example.main(["--quick", "--output", str(tmp_path)])
+    names = {p.name for p in output.glob("*.plotly.json")}
+    assert names == {
+        f"{stem}.plotly.json"
+        for stem in (
+            "setup",
+            "density_profile",
+            "potential_profile",
+            "field_profile",
+            "particle_loss",
+            "sheath_formation",
+        )
+    }
+
+
+def test_child_langmuir_diode_example_writes_its_figures(tmp_path):
+    example = _load("child_langmuir_diode")
+    output = example.main(["--smoke", "--output", str(tmp_path)])
+    names = {p.name for p in output.glob("*.plotly.json")}
+    assert names == {
+        f"{stem}.plotly.json"
+        for stem in (
+            "current",
+            "potential",
+            "density",
+            "phase_space",
+            "stability",
+            "emission",
+        )
+    }
+
+
+def test_segment_beam_example_writes_its_figures(tmp_path):
+    example = _load("segment_beam")
+    output = example.main(["--smoke", "--output", str(tmp_path)])
+    names = {p.name for p in output.glob("*.plotly.json")}
+    assert names == {
+        f"{stem}.plotly.json"
+        for stem in (
+            "segment_kernel",
+            "trajectories",
+            "convergence",
+            "envelope_error",
+            "ribbon",
+        )
+    }
+
+
+def test_boundary_integral_electrodes_example_writes_its_figures(tmp_path):
+    example = _load("boundary_integral_electrodes")
+    output = example.main(["--smoke", "--output", str(tmp_path)])
+    names = {p.name for p in output.glob("*.plotly.json")}
+    assert names == {
+        f"{stem}.plotly.json"
+        for stem in (
+            "grounded_circle",
+            "image_force",
+            "capacitor_profile",
+            "capacitor_charge",
+            "corner_potential",
+        )
+    }

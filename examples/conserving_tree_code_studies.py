@@ -641,7 +641,8 @@ def plot_error_map(output: Path, quick: bool) -> None:
         fig.layout.annotations[col - 1].update(
             text=f"{title}: max error {err.max():.1e}"
         )
-        fig.update_xaxes(scaleanchor=yref, row=1, col=col)
+        fig.update_xaxes(scaleanchor=yref, showgrid=False, row=1, col=col)
+        fig.update_yaxes(showgrid=False, row=1, col=col)
     fig.update_layout(
         shapes=shapes,
         title=(

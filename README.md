@@ -112,10 +112,43 @@ quadtree rebuilt every frame while the particles move) to
 `examples/output/`. `examples/conserving_tree_code_studies.py` adds
 seven parameter studies (softening kernels, the weight function, band
 width, cost at matched accuracy, a long run, an error map, the size of
-the exact-gradient correction). `examples/rational_far_field.py` tests
+the exact-gradient correction). `examples/barnes_hut_tree.py` shows the
+plain Barnes-Hut tree walk (`FlatQuadtree.evaluate`): the quadtree
+adapting to particle density, which boxes the opening criterion accepts
+for one target, the accuracy/speed tradeoff as theta grows, the O(N log
+N) scaling against the direct sum, and an animated two-cluster
+gravitational merger with the tree redrawn every frame.
+`examples/fmm_scaling.py` shows the fast multipole method
+(`FlatQuadtree.fmm`): error against expansion order and theta, the
+M2L/P2P interaction list growing linearly in N, the O(N) scaling
+overtaking the tree walk and the direct sum, and the dual-tree
+traversal’s interaction list for one leaf. `examples/plasma_sheath.py`
+confines a two-species electron-ion cloud between two grounded walls
+with `GroundedStripField`’s Dirichlet image charges, and shows the
+plasma sheath that forms: the density, potential and field profiles,
+particles lost to the walls over time, and an animated phase-space view
+of the sheath developing. `examples/rational_far_field.py` tests
 rational (AAA) far fields with equivalent charges at free positions
 against the multipole series, cell by cell and up a tree: a documented
-negative result.
+negative result. `examples/implicit_push.py` measures what an implicit,
+discrete-gradient energy-conserving step costs in force evaluations with
+Jacobian-free Newton-Krylov: another documented negative result.
+`examples/boltzmann_tree.py` puts Boltzmann electrons on the quadtree
+leaves and solves the nonlinear Debye-shielding problem on them: it
+works, converges at first order, and the damped Picard solve costs a
+fixed number of summation passes. `examples/child_langmuir_diode.py` is
+the first ion-beam example: space-charge-limited emission from the
+cathode of a planar diode by Gauss’s-law injection on the grounded
+strip, reproducing the Child-Langmuir current, profiles and the
+virtual-cathode transient. `examples/segment_beam.py` is steady-state
+space-charge optics without a mesh: trajectories as line charges, their
+segments as tree sources, a fixed-point loop, validated on the expanding
+sheet beam against its exact parabolic envelope.
+`examples/boundary_integral_electrodes.py` is
+`BoundaryIntegralElectrodes`, conductors at prescribed potentials by the
+single-layer boundary-integral (panel) method, validated against a
+closed-form three-image solution for a grounded circle and the exact
+profile of a cylindrical capacitor.
 
 ## Development
 

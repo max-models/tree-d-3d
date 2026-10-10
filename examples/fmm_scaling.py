@@ -432,8 +432,8 @@ def plot_interaction_list(output: Path, n: int = 600) -> None:
                 name=name,
             )
         )
-    fig.update_xaxes(range=[-1.05, 1.05], scaleanchor="y")
-    fig.update_yaxes(range=[-1.05, 1.05])
+    fig.update_xaxes(range=[-1.05, 1.05], scaleanchor="y", showgrid=False)
+    fig.update_yaxes(range=[-1.05, 1.05], showgrid=False)
     fig.update_layout(
         title=(
             "Who the target leaf (black) talks to: near leaves exactly (orange), farther "

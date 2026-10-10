@@ -171,8 +171,8 @@ def plot_tree_boxes(output: Path, n: int = 3000) -> None:
             name="−",
         )
     )
-    fig.update_xaxes(range=[-1.05, 1.05], scaleanchor="y")
-    fig.update_yaxes(range=[-1.05, 1.05])
+    fig.update_xaxes(range=[-1.05, 1.05], scaleanchor="y", showgrid=False)
+    fig.update_yaxes(range=[-1.05, 1.05], showgrid=False)
     fig.update_layout(
         title=f"The quadtree on N = {n} random charges: leaf capacity 8",
         legend={"font": {"size": 10}},
@@ -259,8 +259,8 @@ def plot_opening_criterion(output: Path, n: int = 800, theta: float = 0.5) -> No
             name="target",
         )
     )
-    fig.update_xaxes(range=[-1.05, 1.05], scaleanchor="y")
-    fig.update_yaxes(range=[-1.05, 1.05])
+    fig.update_xaxes(range=[-1.05, 1.05], scaleanchor="y", showgrid=False)
+    fig.update_yaxes(range=[-1.05, 1.05], showgrid=False)
     fig.update_layout(
         title=(
             f"Opening test for one target, θ = {theta}: {len(accepted)} boxes accepted as "
@@ -457,8 +457,8 @@ def animate_cluster_merge(
             name="cluster B",
         )
     )
-    fig.update_xaxes(range=[-1.4, 1.4], scaleanchor="y")
-    fig.update_yaxes(range=[-1.4, 1.4])
+    fig.update_xaxes(range=[-1.4, 1.4], scaleanchor="y", showgrid=False)
+    fig.update_yaxes(range=[-1.4, 1.4], showgrid=False)
     fig.update_layout(legend={"font": {"size": 10}})
 
     frame_list = []
