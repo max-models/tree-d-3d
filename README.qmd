@@ -137,6 +137,14 @@ beam against its exact parabolic envelope.
 prescribed potentials by the single-layer boundary-integral (panel) method, validated against a
 closed-form three-image solution for a grounded circle and the exact profile of a cylindrical
 capacitor.
+`examples/einzel_lens.py` is a practical use of the electrode solver: a 2D slit einzel lens
+focusing a beam of test charges, which turns out *not* to share the round-aperture einzel lens's
+textbook polarity-independence -- both signs focus, but at very different distances.
+`examples/ion_extraction.py` combines the electrode solver with the tree code's own space-charge
+field: a continuously replenished ion source extracted through a grounded plasma-electrode
+aperture and a biased extractor, showing the beam narrow and then diverge, and the extractor
+intercept a growing share of it as the beam's own space charge grows -- a space-charge-limited
+extraction.
 
 ## Development
 

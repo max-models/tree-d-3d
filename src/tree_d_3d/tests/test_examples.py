@@ -213,3 +213,35 @@ def test_boundary_integral_electrodes_example_writes_its_figures(tmp_path):
             "corner_potential",
         )
     }
+
+
+def test_einzel_lens_example_writes_its_figures(tmp_path):
+    example = _load("einzel_lens")
+    output = example.main(["--smoke", "--output", str(tmp_path)])
+    names = {p.name for p in output.glob("*.plotly.json")}
+    assert names == {
+        f"{stem}.plotly.json"
+        for stem in (
+            "geometry",
+            "focusing_trajectories",
+            "polarity_asymmetry",
+            "energy_conservation",
+            "focal_length",
+        )
+    }
+
+
+def test_ion_extraction_example_writes_its_figures(tmp_path):
+    example = _load("ion_extraction")
+    output = example.main(["--smoke", "--output", str(tmp_path)])
+    names = {p.name for p in output.glob("*.plotly.json")}
+    assert names == {
+        f"{stem}.plotly.json"
+        for stem in (
+            "geometry",
+            "beam_snapshot",
+            "envelope",
+            "transmission_scaling",
+            "beam_formation",
+        )
+    }

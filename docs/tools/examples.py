@@ -217,8 +217,12 @@ def convert_example(script: Path, order: int) -> list[str]:
     )
 
     def chart(name: str, caption: str) -> str:
+        # A JSX expression (``{...}``), not a plain quoted attribute: a caption containing a
+        # literal ``"`` (as some do) is invalid MDX in a bare ``title="..."`` attribute, since
+        # JSX has no backslash-escape for a quote inside one -- unlike the JSON string
+        # ``_yaml_string`` returns, which doubles as a valid JS string literal inside ``{...}``.
         title = _yaml_string(caption or name)
-        tag = f'<PlotlyChart src="/examples/{slug}/{name}.plotly.json" title={title} />'
+        tag = f'<PlotlyChart src="/examples/{slug}/{name}.plotly.json" title={{{title}}} />'
         return f"{tag}\n\n*{caption}*" if caption else tag
 
     if animations:
