@@ -1,7 +1,7 @@
 # Development environment (uv), README (Quarto) and the documentation site (docs/, Astro + Starlight).
-# Notebook tool: docs/tools/notebooks.py. Example-gallery tool: docs/tools/examples.py.
+# Notebook tool: starlight-notebooks, from @max-models/starlight-theme (docs/node_modules). Example-gallery tool: docs/tools/examples.py.
 PYTHON ?= .venv/bin/python
-NOTEBOOKS = $(PYTHON) docs/tools/notebooks.py
+NOTEBOOKS = cd docs && $(DOCS_ENV) npx starlight-notebooks
 EXAMPLES = $(PYTHON) docs/tools/examples.py
 DOCS_ENV = DOCS_PYTHON=$(shell $(PYTHON) -c "import sys; print(sys.executable)")
 FORCE ?=

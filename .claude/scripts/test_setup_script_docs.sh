@@ -9,8 +9,8 @@ trap 'rm -rf "$WORK"' EXIT
 rsync -a --exclude .git --exclude node_modules --exclude dist --exclude .astro --exclude .venv "$REPO/" "$WORK/"
 cd "$WORK"
 bash setup_project.sh my-test-app
-grep -q "const pythonPackage = 'my_test_app'" docs/astro.config.mjs
-grep -q "/api/my_test_app/" docs/src/components/Header.astro
+grep -q "pythonPackage: 'my_test_app'" docs/astro.config.mjs
+grep -q "/api/my_test_app/" docs/astro.config.mjs
 grep -q "/api/my_test_app/index.html" .github/workflows/docs.yml
 grep -q "src/my_test_app/__init__.py" release-please-config.json
 grep -q "source = \[ \"my_test_app\" \]" pyproject.toml

@@ -175,7 +175,11 @@ junit/
 .quarto/
 README_files/
 
-# written by a local tool
-stc.lock
 # figures of the example scripts
 examples/output/
+
+# Pyccel build artefacts and lock files (pyccel compile writes the locks to
+# the directory it runs from)
+__pyccel__/
+.lock_acquisition.lock
+stc.lock
