@@ -29,7 +29,7 @@ jobs:
         uv run python docs/tools/examples.py convert --strict
       smoke-paths: |
         getting-started/installation/index.html
-        tutorials/example-tutorial/index.html
+        tutorials/fields-and-simulation/index.html
         examples/conserving-tree-code/index.html
         api/tree_d_3d/index.html
-        api/tree_d_3d/main/index.html
+        api/tree_d_3d/simulation/index.html
