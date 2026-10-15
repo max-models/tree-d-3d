@@ -1,4 +1,6 @@
-"""Barnes-Hut trees and fast multipole methods for charged particles in a plane.
+"""Tree Dynamics in 3D: Barnes-Hut trees and fast multipole methods for charged particles.
+
+The particles move in a plane for now; full 3D, on an octree, is planned.
 
 * :class:`FlatQuadtree` and :func:`direct_field`: fields of point charges (the 3D
   Coulomb kernel) or line charges (``kernel="log"``, the 2D Poisson kernel) at

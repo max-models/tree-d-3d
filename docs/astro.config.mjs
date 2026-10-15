@@ -6,7 +6,7 @@ import { defineDocs } from '@max-models/starlight-theme';
 export default defineDocs({
 	repo: 'tree-d-3d',
 	title: 'tree-d-3d',
-	description: 'Barnes-Hut trees and fast multipole methods for charged particles in a plane.',
+	description: 'Tree Dynamics in 3D: Barnes-Hut trees and fast multipole methods for charged particles.',
 	pythonPackage: 'tree_d_3d',
 	nav: [
 		{ label: 'Getting started', link: '/getting-started/installation/' },

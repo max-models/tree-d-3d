@@ -11,9 +11,13 @@ analysis](https://github.com/max-models/tree-d-3d/actions/workflows/static_analy
 [![PyPI](https://img.shields.io/pypi/v/tree-d-3d.png)](https://pypi.org/project/tree-d-3d/)
 [![Python](https://img.shields.io/pypi/pyversions/tree-d-3d.png)](https://pypi.org/project/tree-d-3d/)
 
-Barnes-Hut trees and fast multipole methods for charged particles in a
-plane, on NumPy, CuPy or the Apple GPU. Extracted from
+**Tree Dynamics in 3D**: Barnes-Hut trees and fast multipole methods for
+charged particles, on NumPy, CuPy or the Apple GPU. Extracted from
 [PICNIC](https://github.com/max-models/picnic).
+
+The particles move in a plane for now, with the 3D Coulomb field of
+point charges or the 2D field of line charges. Full 3D, on an octree, is
+planned.
 
 - `FlatQuadtree`: a flat array quadtree with multipole moments. Fields
   of point charges (the 3D Coulomb kernel, `kernel="coulomb"`) or of
