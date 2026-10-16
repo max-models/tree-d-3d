@@ -20,10 +20,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up uv and Python ${{ matrix.python-version }}
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
         with:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
@@ -33,7 +33,7 @@ jobs:
 
       # the Pyccel kernels, compiled on first use, keyed on their sources
       - name: Cache compiled kernels
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/tree-d-3d/kernels
           key: tree-d-3d-kernels-${{ runner.os }}-py${{ matrix.python-version }}-${{ hashFiles('src/tree_d_3d/kernels/*/*_pyccel.py') }}
@@ -43,7 +43,7 @@ jobs:
         run: uv run pytest --cov --cov-report=xml --cov-report=term .
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage.xml
