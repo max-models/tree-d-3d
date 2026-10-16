@@ -3,6 +3,13 @@ name: Docs
 # The Astro + Starlight site in docs/: hand-written pages, the executed notebooks and the API
 # reference. Built on every push and pull request with the shared workflow of
 # max-models/starlight-theme; deployed to GitHub Pages from devel.
+#
+# The examples take about 25 minutes in a row, so they run first, in SHARDS parallel jobs
+# (docs/tools/examples.py run --shard I/N, balanced by docs/tools/example_weights.json), and
+# each job runs its examples in parallel as well. Their results go to the docs job as artifacts.
+# If the artifacts cannot be downloaded the docs job runs the missing examples itself (in
+# parallel, and only those whose source changed), so the site still builds, only slower.
+# The shard count is in the matrix and in the two places that name it below: keep them equal.
 
 on:
   push:
@@ -12,6 +19,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: read # gh run download: the artifacts of the shard jobs
   contents: read
   pages: write
   id-token: write
@@ -21,10 +29,49 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  examples:
+    name: Examples, shard ${{ matrix.shard }} of 4
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install the project
+        run: uv sync --extra examples
+
+      - name: Run this shard of the examples
+        run: uv run python docs/tools/examples.py run --shard ${{ matrix.shard }}/4 --python "$(pwd)/.venv/bin/python"
+
+      - name: Keep the results for the docs job
+        uses: actions/upload-artifact@v4
+        with:
+          name: examples-${{ matrix.shard }}
+          path: docs/.cache/examples
+          include-hidden-files: true # the path is under .cache
+          if-no-files-found: error
+          retention-days: 3
+
   docs:
+    needs: examples
     uses: max-models/starlight-theme/.github/workflows/docs.yml@v0.1.0
     with:
       pre-build: |
+        mkdir -p docs/.cache/examples
+        export GH_TOKEN=${{ github.token }}
+        if gh run download ${{ github.run_id }} --pattern 'examples-*' --dir "$RUNNER_TEMP/shards" \
+            && cp -R "$RUNNER_TEMP"/shards/*/. docs/.cache/examples/; then
+          echo "Examples taken from the shard jobs."
+        else
+          echo "No shard results: the examples run here."
+        fi
         uv run python docs/tools/examples.py run --python "$(pwd)/.venv/bin/python"
         uv run python docs/tools/examples.py convert --strict
       smoke-paths: |

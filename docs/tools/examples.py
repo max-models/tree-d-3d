@@ -7,7 +7,10 @@ static fallback) and ``<name>.html`` (a standalone copy, not used by the docs).
 ``run``
     Runs each example with ``--quick --output docs/.cache/examples/<slug>``. A script is rerun
     only when its source hash changed (``--force`` reruns all of them, ``--full`` drops
-    ``--quick``).
+    ``--quick``). The examples run in parallel (``--jobs N``, by default one per core, longest
+    first), and ``--shard I/N`` runs only the I-th of N balanced groups, so that a CI matrix can
+    spread them over several machines (the weights are in ``example_weights.json``);
+    ``--dry-run`` prints the plan.
 ``convert``
     Writes ``docs/src/content/docs/examples/<slug>.mdx`` from the figures of a run, copying their
     ``.plotly.json`` into ``docs/public/examples/<slug>/``. Captions and the intro text come from
@@ -23,12 +26,16 @@ from __future__ import annotations
 
 import argparse
 import ast
+import concurrent.futures
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 DOCS = Path(__file__).resolve().parents[1]
@@ -106,38 +113,165 @@ def docstring_of(script: Path) -> dict:
 
 # Running --------------------------------------------------------------------------------- #
 
+WEIGHTS = Path(__file__).with_name("example_weights.json")
+#: Libraries that start one thread per core: with parallel examples each gets its share.
+THREAD_VARIABLES = (
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "NUMBA_NUM_THREADS",
+)
+
+
+def weights() -> dict[str, float]:
+    """Estimated minutes of each example by slug (1 for a script that is not listed)."""
+    table = json.loads(WEIGHTS.read_text()) if WEIGHTS.exists() else {}
+    return {k: float(v) for k, v in table.items() if not k.startswith("_")}
+
+
+def parse_shard(text: str) -> tuple[int, int]:
+    """``"2/4"`` to (2, 4): the second of four shards."""
+    try:
+        index, count = (int(part) for part in text.split("/"))
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"a shard is I/N, such as 2/4, not {text!r}"
+        ) from None
+    if not 1 <= index <= count:
+        raise argparse.ArgumentTypeError(f"shard {text}: need 1 <= I <= N")
+    return index, count
+
+
+def shard_of(paths: list[Path], index: int, count: int) -> list[Path]:
+    """The ``index``-th of ``count`` groups of ``paths``, balanced by their weights.
+
+    Greedy: the heaviest script first, each into the group with the least weight so far. It
+    depends only on the slugs and the weights file, so every shard job computes the same split.
+    """
+    table = weights()
+    load = [0.0] * count
+    groups: list[list[Path]] = [[] for _ in range(count)]
+    for path in sorted(paths, key=lambda p: (-table.get(slug_of(p), 1.0), slug_of(p))):
+        lightest = min(range(count), key=lambda g: (load[g], g))
+        groups[lightest].append(path)
+        load[lightest] += table.get(slug_of(path), 1.0)
+    return groups[index - 1]
+
+
+def _run_one(script: Path, args: argparse.Namespace, env: dict[str, str]) -> dict:
+    """Run one example in its own process, keeping its output for the caller to print."""
+    slug = slug_of(script)
+    out_dir = CACHE / slug
+    shutil.rmtree(out_dir, ignore_errors=True)
+    out_dir.mkdir(parents=True)
+    command = [args.python, str(script), "--output", str(out_dir)]
+    if not args.full:
+        command.append("--quick")
+    start = time.monotonic()
+    done = subprocess.run(
+        command,
+        cwd=REPO,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    return {
+        "slug": slug,
+        "script": script,
+        "ok": done.returncode == 0,
+        "returncode": done.returncode,
+        "seconds": time.monotonic() - start,
+        "log": done.stdout,
+    }
+
 
 def cmd_run(args: argparse.Namespace) -> None:
     CACHE.mkdir(parents=True, exist_ok=True)
-    failed = []
-    for script in scripts():
+    chosen = scripts()
+    if args.shard:
+        chosen = shard_of(chosen, *args.shard)
+    table = weights()
+    pending = []
+    for script in chosen:
         slug = slug_of(script)
-        out_dir = CACHE / slug
         key_file = CACHE / f"{slug}.key"
-        error_file = CACHE / f"{slug}.error"
-        key = script_hash(script)
         if (
             not args.force
-            and out_dir.exists()
+            and (CACHE / slug).exists()
             and key_file.exists()
-            and key_file.read_text() == key
+            and key_file.read_text() == script_hash(script)
         ):
             print(f"[examples] {slug}: up to date")
-            continue
-        print(f"[examples] {slug}: running", flush=True)
-        shutil.rmtree(out_dir, ignore_errors=True)
-        out_dir.mkdir(parents=True)
-        command = [args.python, str(script), "--output", str(out_dir)]
-        if not args.full:
-            command.append("--quick")
-        try:
-            subprocess.run(command, cwd=REPO, check=True)
-            error_file.unlink(missing_ok=True)
-            key_file.write_text(key)
-        except subprocess.CalledProcessError as exc:
-            error_file.write_text(str(exc))
-            failed.append(slug)
-            print(f"[examples] {slug}: FAILED: {exc}")
+        else:
+            pending.append(script)
+    # the longest first, so that the last to start is not the longest to finish
+    pending.sort(key=lambda p: (-table.get(slug_of(p), 1.0), slug_of(p)))
+    jobs = args.jobs or os.cpu_count() or 1
+    jobs = max(1, min(jobs, len(pending)))
+    shard = f" (shard {args.shard[0]}/{args.shard[1]})" if args.shard else ""
+    print(f"[examples]{shard} {len(pending)} to run, {jobs} at a time")
+    for script in pending:
+        print(
+            f"[examples]   {slug_of(script)} (about {table.get(slug_of(script), 1.0):g} min)"
+        )
+    if args.dry_run or not pending:
+        return
+
+    env = dict(os.environ)
+    share = str(max(1, (os.cpu_count() or 1) // jobs))
+    for name in THREAD_VARIABLES:
+        env.setdefault(name, share)
+    github = bool(os.environ.get("GITHUB_ACTIONS"))
+    lock = threading.Lock()
+    results = []
+
+    def finish(result: dict) -> None:
+        slug = result["slug"]
+        with lock:  # one example's output at a time, in a folding group on GitHub
+            print(
+                f"::group::{slug}" if github else f"[examples] {slug}: output",
+                flush=True,
+            )
+            print(result["log"].rstrip(), flush=True)
+            if github:
+                print("::endgroup::", flush=True)
+            error_file = CACHE / f"{slug}.error"
+            if result["ok"]:
+                error_file.unlink(missing_ok=True)
+                (CACHE / f"{slug}.key").write_text(script_hash(result["script"]))
+                (CACHE / f"{slug}.time").write_text(f"{result['seconds']:.1f}")
+                print(
+                    f"[examples] {slug}: done in {result['seconds'] / 60:.1f} min",
+                    flush=True,
+                )
+            else:
+                error_file.write_text(
+                    f"exit status {result['returncode']}\n{result['log'][-2000:]}"
+                )
+                print(
+                    f"[examples] {slug}: FAILED (exit status {result['returncode']})",
+                    flush=True,
+                )
+
+    started = time.monotonic()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool:
+        futures = [pool.submit(_run_one, script, args, env) for script in pending]
+        for future in concurrent.futures.as_completed(futures):
+            result = future.result()
+            finish(result)
+            results.append(result)
+    wall = time.monotonic() - started
+    work = sum(r["seconds"] for r in results)
+    print(
+        f"[examples] {len(results)} examples, {work / 60:.1f} min of work in {wall / 60:.1f} min"
+    )
+    for r in sorted(results, key=lambda r: -r["seconds"]):
+        print(
+            f"[examples]   {r['slug']:<32} {r['seconds'] / 60:5.1f} min"
+            f"{'' if r['ok'] else '  FAILED'}"
+        )
+    failed = [r["slug"] for r in results if not r["ok"]]
     if failed:
         print(f"[examples] {len(failed)} failed: {', '.join(failed)}")
         sys.exit(1)
@@ -272,6 +406,22 @@ def main(argv: list[str] | None = None) -> None:
     )
     run.add_argument(
         "--python", default=sys.executable, help="interpreter to run scripts with"
+    )
+    run.add_argument(
+        "--jobs",
+        "-j",
+        type=int,
+        default=0,
+        help="examples to run at a time (default: one per core)",
+    )
+    run.add_argument(
+        "--shard",
+        type=parse_shard,
+        metavar="I/N",
+        help="run only the I-th of N groups of examples, balanced by example_weights.json",
+    )
+    run.add_argument(
+        "--dry-run", action="store_true", help="print what would run and stop"
     )
     run.set_defaults(func=cmd_run)
     convert = sub.add_parser("convert", help="write the MDX pages and assets")

@@ -39,7 +39,7 @@ docs-notebooks:  ## execute the changed tutorials and convert all of them (FORCE
 	$(NOTEBOOKS) convert
 
 docs-examples:  ## run the changed examples (--quick) and convert all of them (FORCE=1 reruns all)
-	$(EXAMPLES) run $(if $(FORCE),--force,)
+	$(EXAMPLES) run $(if $(FORCE),--force,) $(if $(JOBS),--jobs $(JOBS),)
 	$(EXAMPLES) convert
 
 docs-dev:  ## live preview at http://localhost:4321/tree-d-3d/

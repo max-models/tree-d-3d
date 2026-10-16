@@ -1,0 +1,16 @@
+{
+  "_comment": "Estimated minutes of each example in --quick mode, from the docstrings of the scripts. Used to order the parallel queue and to balance the shards (run --shard I/N); a script that is not listed counts as 1. Replace with the times that `run` prints at the end when they differ.",
+  "boltzmann-tree": 10,
+  "child-langmuir-diode": 4,
+  "segment-beam": 4,
+  "conserving-tree-code-studies": 3,
+  "ion-extraction": 1,
+  "implicit-push": 1,
+  "barnes-hut-tree": 1,
+  "fmm-scaling": 1,
+  "plasma-sheath": 1,
+  "boundary-integral-electrodes": 1,
+  "einzel-lens": 1,
+  "conserving-tree-code": 0.5,
+  "rational-far-field": 0.5
+}
