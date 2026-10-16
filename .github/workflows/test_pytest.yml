@@ -13,6 +13,8 @@ on:
 jobs:
   pytest:
     runs-on: ubuntu-latest
+    # a run without the compiled kernels takes an hour: stop it instead of waiting
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -30,6 +32,16 @@ jobs:
 
       - name: Install project
         run: uv sync --extra test
+
+      # The Pyccel kernels link against libpython without recording where it is. The Pythons that
+      # uv downloads (3.10, 3.11, 3.13 here; 3.12 is the runner's own, in /usr/lib) keep it in
+      # their own lib/ directory, so the kernels fail to load there ("libpython3.11.so.1.0:
+      # cannot open shared object file") and the tests fall back to slow implementations.
+      - name: Let the compiled kernels find libpython
+        run: |
+          libdir="$(uv run python -c 'import sys; print(sys.base_prefix + "/lib")')"
+          ls "$libdir" | grep -i libpython || true
+          echo "LD_LIBRARY_PATH=$libdir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
 
       # the Pyccel kernels, compiled on first use, keyed on their sources
       - name: Cache compiled kernels

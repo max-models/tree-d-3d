@@ -11,7 +11,10 @@ The site in `docs/` is built with [Astro](https://astro.build/) and
   Each notebook is executed and its outputs (text, images, tables) are written into an MDX page.
 - **Examples**, converted from the scripts in `examples/` by `docs/tools/examples.py`. Each script
   is run and its figures are published as interactive Plotly charts, with captions taken from its
-  own docstring.
+  own docstring. The scripts run in parallel (`--jobs N`, by default one per core, `make docs-examples JOBS=N`
+  here), and in CI in four shards on four machines (`run --shard I/N`, balanced by the estimated
+  minutes in `docs/tools/example_weights.json`: update them when an example's runtime changes; `run` prints the
+  measured times at the end).
 - **API reference**, generated from the docstrings by
   [starlight-pydocs](https://ewels.github.io/starlight-pydocs/), one page per module.
 
