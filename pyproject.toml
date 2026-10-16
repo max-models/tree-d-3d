@@ -46,7 +46,7 @@ optional-dependencies.docs = [
 ]
 optional-dependencies.gpu = [ "cupy-cuda12x" ]
 optional-dependencies.metal = [ "mlx; sys_platform == 'darwin' and platform_machine == 'arm64'" ]
-optional-dependencies.test = [ "pytest", "pytest-cov" ]
+optional-dependencies.test = [ "pytest", "pytest-cov", "tree-d-3d[examples]" ]
 urls."Source" = "https://github.com/max-models/tree-d-3d"
 
 [tool.setuptools.packages.find]
