@@ -122,3 +122,71 @@ def test_all_particles_absorbed_leaves_an_empty_simulation():
 def test_invalid_walls(walls, match):
     with pytest.raises(ValueError, match=match):
         Simulation([ChargedBody(0.7, 0)], Quad(0, 0, 1), absorbing_walls=walls)
+
+
+def test_particles_entering_an_absorbing_object_are_recorded_under_its_name():
+    from simgeometry import Circle, Rectangle
+
+    bodies = [
+        ChargedBody(-0.45, 0.0, vx=1.0, charge=0),  # into the plate at x in [-0.2, 0.2]
+        ChargedBody(0.0, 0.55, vy=1.0, charge=0),  # out of the round chamber
+        ChargedBody(0.0, -0.5, charge=0),  # at rest, stays
+    ]
+    objects = {
+        "plate": Rectangle(midpoint=(0.0, 0.0), side_lengths=(0.4, 0.4)),
+        "chamber": Circle(midpoint=(0.0, 0.0), radius=0.8, inverted=True),
+    }
+    sim = Simulation(bodies, Quad(0, 0, 1), k_e=1, dt=0.1, absorbing_objects=objects)
+    assert set(sim.absorbing_objects) == {"plate", "chamber"}
+    for _ in range(4):
+        sim.step()
+    assert sim.absorbed.counts() == {"plate": 1, "chamber": 1}
+    assert sim.bodies == [bodies[2]]
+    np.testing.assert_allclose(sim.absorbed.time, [0.3, 0.3])
+    assert list(sim.absorbed.wall) == ["plate", "chamber"]
+
+
+def test_walls_take_precedence_over_objects():
+    from simgeometry import Rectangle
+
+    bodies = [ChargedBody(0.95, 0.0, vx=1.0, charge=0)]
+    sim = Simulation(
+        bodies,
+        Quad(0, 0, 2),
+        k_e=1,
+        dt=0.1,
+        absorbing_walls={"x_max": 1.0},
+        absorbing_objects={
+            "block": Rectangle(midpoint=(1.5, 0.0), side_lengths=(1, 1))
+        },
+    )
+    sim.step()
+    assert sim.absorbed.counts() == {"x_max": 1}
+
+
+def test_absorbing_objects_are_validated():
+    from simgeometry import Circle, Sphere
+
+    inside = [ChargedBody(0.0, 0.0, charge=0)]
+    kwargs = {"k_e": 1, "dt": 0.1}
+    with pytest.raises(ValueError, match="outside the absorbing objects"):
+        Simulation(
+            inside,
+            Quad(0, 0, 1),
+            absorbing_objects={"disc": Circle(midpoint=(0, 0), radius=0.5)},
+            **kwargs,
+        )
+    with pytest.raises(ValueError, match="2D simgeometry shape"):
+        Simulation(
+            inside,
+            Quad(0, 0, 1),
+            absorbing_objects={"ball": Sphere(midpoint=(5, 5, 5), radius=0.5)},
+            **kwargs,
+        )
+    with pytest.raises(ValueError, match="wall name"):
+        Simulation(
+            inside,
+            Quad(0, 0, 1),
+            absorbing_objects={"x_max": Circle(midpoint=(5, 5), radius=0.5)},
+            **kwargs,
+        )

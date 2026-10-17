@@ -3,7 +3,8 @@
 A particle code with electrodes needs conductors held at prescribed potentials, not just
 grounded absorbing walls or the two infinite grounded plates of
 :class:`tree_d_3d.GroundedStripField`. :class:`tree_d_3d.BoundaryIntegralElectrodes`
-discretises each conductor's boundary into straight panels, collocates the Dirichlet
+discretises each conductor's boundary into straight panels (here from
+:mod:`simgeometry` shapes, by :func:`tree_d_3d.conductors_from_shape`), collocates the Dirichlet
 condition at their midpoints and solves the resulting dense linear system for the
 induced line-charge density -- the standard first-kind single-layer boundary-element
 method, with a closed-form self-term for each panel. This example checks it against two
@@ -51,8 +52,9 @@ import numpy as np
 import plotly.graph_objects as go
 from plasma_plots import save_figure
 from plotly.subplots import make_subplots
+from simgeometry import Circle, Polygon
 
-from tree_d_3d import BoundaryIntegralElectrodes, Conductor, circle_vertices
+from tree_d_3d import BoundaryIntegralElectrodes, Conductor, conductors_from_shape
 
 COLORS = {"C0": "#1f77b4", "C1": "#ff7f0e", "C2": "#2ca02c", "C3": "#d62728"}
 K_E = 1.0  # code units: the log kernel's own reference length is the unit of distance
@@ -80,20 +82,12 @@ def capacitor_charge(a: float, b: float, v1: float, v2: float) -> float:
     return -(v2 - v1) / (2 * K_E * np.log(b / a))
 
 
-def point_in_polygon(points: np.ndarray, polygon: np.ndarray) -> np.ndarray:
-    """Ray-casting point-in-polygon test; ``points`` ``(2, M)``, ``polygon`` ``(2, n)``."""
-    x, y = points
-    px, py = polygon
-    n = polygon.shape[1]
-    inside = np.zeros(x.shape, dtype=bool)
-    for i in range(n):
-        x1, y1 = px[i], py[i]
-        x2, y2 = px[(i + 1) % n], py[(i + 1) % n]
-        crosses = ((y1 > y) != (y2 > y)) & (
-            x < (x2 - x1) * (y - y1) / (y2 - y1 + 1e-300) + x1
-        )
-        inside ^= crosses
-    return inside
+def circle(radius: float, n: int, potential: float) -> Conductor:
+    """A circular conductor of ``n`` panels centred on the origin, from a simgeometry ``Circle``."""
+    (conductor,) = conductors_from_shape(
+        Circle(midpoint=(0.0, 0.0), radius=radius), potential, 2 * np.pi * radius / n
+    )
+    return conductor
 
 
 def main(argv: list[str] | None = None) -> Path:
@@ -120,9 +114,7 @@ def main(argv: list[str] | None = None) -> Path:
     a, d, q0 = 1.5, 5.0, 1.0
     f_exact = three_image_force(a, d, q0)
     n_detail = panels_scan[len(panels_scan) // 2]
-    elec = BoundaryIntegralElectrodes(
-        [Conductor(circle_vertices((0, 0), a, n_detail), 0.0)], k_e=K_E
-    )
+    elec = BoundaryIntegralElectrodes([circle(a, n_detail, 0.0)], k_e=K_E)
     elec.solve(np.array([[d], [0.0]]), [q0])
     theta = np.linspace(0, 2 * np.pi, 2000, endpoint=False)
     boundary = np.stack((a * np.cos(theta), a * np.sin(theta)))
@@ -153,9 +145,7 @@ def main(argv: list[str] | None = None) -> Path:
     fig = go.Figure()
     errors = []
     for n in panels_scan:
-        e = BoundaryIntegralElectrodes(
-            [Conductor(circle_vertices((0, 0), a, n), 0.0)], k_e=K_E
-        )
+        e = BoundaryIntegralElectrodes([circle(a, n, 0.0)], k_e=K_E)
         e.solve(np.array([[d], [0.0]]), [q0])
         _, field = e.force_on_sources()
         f_bem = q0 * field[0, 0]
@@ -190,8 +180,8 @@ def main(argv: list[str] | None = None) -> Path:
     a2, b2, v1, v2 = 1.0, 3.0, 1.0, 0.0
     q_exact = capacitor_charge(a2, b2, v1, v2)
     n_cap = panels_scan[len(panels_scan) // 2]
-    inner = Conductor(circle_vertices((0, 0), a2, n_cap), v1)
-    outer = Conductor(circle_vertices((0, 0), b2, n_cap), v2)
+    inner = circle(a2, n_cap, v1)
+    outer = circle(b2, n_cap, v2)
     cap = BoundaryIntegralElectrodes([inner, outer], k_e=K_E)
     cap.solve()
     r = np.linspace(a2 + 0.05, b2 - 0.05, 60)
@@ -226,10 +216,7 @@ def main(argv: list[str] | None = None) -> Path:
     charge_errors = []
     for n in panels_scan:
         c = BoundaryIntegralElectrodes(
-            [
-                Conductor(circle_vertices((0, 0), a2, n), v1),
-                Conductor(circle_vertices((0, 0), b2, n), v2),
-            ],
+            [circle(a2, n, v1), circle(b2, n, v2)],
             k_e=K_E,
         )
         c.solve()
@@ -264,20 +251,13 @@ def main(argv: list[str] | None = None) -> Path:
     save_figure(fig, output / "capacitor_charge")
 
     # 5: a non-convex conductor, visual + boundary-residual capstone
-    l_shape = np.array([[0, 3, 3, 1, 1, 0], [0, 0, 1, 1, 3, 3]], dtype=float)
-    l_shape -= l_shape.mean(axis=1, keepdims=True)
+    corners = np.array([[0, 3, 3, 1, 1, 0], [0, 0, 1, 1, 3, 3]], dtype=float)
+    corners -= corners.mean(axis=1, keepdims=True)
+    l_shape = Polygon(vertices=corners.T)
     n_l = max(panels_scan[len(panels_scan) // 2], 60)
-    per_edge = max(2, n_l // l_shape.shape[1])
-    vertices = np.concatenate(
-        [
-            l_shape[:, i, None]
-            + (l_shape[:, (i + 1) % l_shape.shape[1], None] - l_shape[:, i, None])
-            * np.linspace(0, 1, per_edge, endpoint=False)
-            for i in range(l_shape.shape[1])
-        ],
-        axis=1,
-    )
-    l_conductor = Conductor(vertices, 0.0)
+    perimeter = 12.0
+    (l_conductor,) = conductors_from_shape(l_shape, 0.0, perimeter / n_l)
+    vertices = l_conductor.vertices
     l_elec = BoundaryIntegralElectrodes([l_conductor], k_e=K_E)
     q_pos = np.array([[3.5], [2.0]])
     l_elec.solve(q_pos, [1.0])
@@ -302,7 +282,7 @@ def main(argv: list[str] | None = None) -> Path:
     xx, yy = np.meshgrid(xs, ys)
     grid_pts = np.stack((xx.ravel(), yy.ravel()))
     phi_grid = l_elec.potential(grid_pts).reshape(grid, grid)
-    inside = point_in_polygon(grid_pts, vertices).reshape(grid, grid)
+    inside = np.asarray(l_shape.contains_points(grid_pts)).reshape(grid, grid)
     phi_grid = np.where(inside, np.nan, phi_grid)
 
     fig = make_subplots()

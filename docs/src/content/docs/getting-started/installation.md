@@ -3,7 +3,8 @@ title: Installation
 description: Install tree-d-3d and its optional GPU backends.
 ---
 
-tree-d-3d needs Python 3.10 or newer, [cunumpy](https://github.com/max-models/cunumpy) and
+tree-d-3d needs Python 3.10 or newer, [cunumpy](https://github.com/max-models/cunumpy),
+[simgeometry](https://github.com/max-models/simgeometry) for electrode and wall shapes, and
 [Pyccel](https://github.com/pyccel/pyccel) (with a C compiler) for the compiled CPU kernels.
 Without a working Pyccel the NumPy versions of the kernels run instead, which is much
 slower for the tree kernels.

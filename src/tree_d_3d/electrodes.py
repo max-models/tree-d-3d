@@ -14,7 +14,8 @@ separated from the target; see the note's "Cost" section for the near-panel corr
 this skips).
 
 Panel counts here are the hundreds to low thousands the validation examples need, so the
-system is solved directly (``numpy.linalg.solve``); the note's plan of an FMM-accelerated
+system is solved directly, by an LU factorisation done once per geometry and reused by
+every :meth:`BoundaryIntegralElectrodes.solve`; the note's plan of an FMM-accelerated
 GMRES solve, needed once panel and particle counts both grow large, is not implemented.
 
 The log kernel is the one :class:`tree_d_3d.FlatQuadtree` and :func:`tree_d_3d.direct_field`
@@ -24,13 +25,21 @@ charge, without ``k_e`` (applied here, as in :class:`tree_d_3d.GroundedStripFiel
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from typing import Protocol
 
 import numpy as np
+from scipy.linalg import lu_factor, lu_solve
 
 from tree_d_3d.constants import K_E
 from tree_d_3d.flat_tree import direct_field
+
+
+class OutlinedShape(Protocol):
+    """A 2D shape with boundary loops, such as any 2D :mod:`simgeometry` shape."""
+
+    def outlines(self, max_spacing=None) -> list[np.ndarray]: ...
 
 
 @dataclass
@@ -46,12 +55,22 @@ class Conductor:
     closed: bool = True
 
 
-def circle_vertices(center: tuple[float, float], radius: float, n: int) -> np.ndarray:
-    """``(2, n)`` vertices evenly spaced around a circle, for a :class:`Conductor`."""
-    theta = np.linspace(0, 2 * np.pi, n, endpoint=False)
-    return np.stack(
-        (center[0] + radius * np.cos(theta), center[1] + radius * np.sin(theta))
-    )
+def conductors_from_shape(
+    shape: OutlinedShape,
+    potential: float,
+    max_panel_length: float | Callable[[np.ndarray], np.ndarray],
+) -> list[Conductor]:
+    """Closed conductors on the boundary of a 2D :mod:`simgeometry` shape.
+
+    One :class:`Conductor` per boundary loop of ``shape.outlines(max_panel_length)``
+    (an ``Aperture2D`` gives two, one per plate), all held at ``potential``. Panels are
+    at most ``max_panel_length`` long; it can also be a function of ``(2, m)`` points
+    returning ``(m,)`` lengths, to grade the panels (short where the field varies
+    fastest, such as an aperture tip). Keep panels shorter than the gaps between
+    surfaces, a plate's thickness included: the off-diagonal entries treat each panel
+    as a point charge at its midpoint.
+    """
+    return [Conductor(loop, potential) for loop in shape.outlines(max_panel_length)]
 
 
 class BoundaryIntegralElectrodes:
@@ -93,6 +112,7 @@ class BoundaryIntegralElectrodes:
         self.target_potential = np.concatenate(target)
         self.num_panels = self.midpoints.shape[1]
         self._matrix = self._build_matrix()
+        self._lu = lu_factor(self._matrix)
         #: solved panel charges, set by :meth:`solve`
         self.charge: np.ndarray | None = None
         self._source_positions = np.zeros((2, 0))
@@ -134,8 +154,9 @@ class BoundaryIntegralElectrodes:
         else:
             free_raw = np.zeros(self.num_panels)
         rhs = self.target_potential / self.k_e - free_raw
-        self.charge = np.linalg.solve(self._matrix, rhs)
-        return self.charge
+        charge = lu_solve(self._lu, rhs)
+        self.charge = charge
+        return charge
 
     def probe(self, points) -> tuple[np.ndarray, np.ndarray]:
         """Potential (V) and field (V/m, shape ``(2, M)``) at ``points`` ``(2, M)``.
