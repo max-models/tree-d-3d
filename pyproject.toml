@@ -26,6 +26,7 @@ dependencies = [
   "numpy",
   "pyccel>2.0",
   "scipy",
+  "simgeometry @ git+https://github.com/max-models/simgeometry@devel",
 ]
 
 optional-dependencies.dev = [

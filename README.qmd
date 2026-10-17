@@ -27,17 +27,22 @@ field of line charges. Full 3D, on an octree, is planned.
   O(N) fast multipole method (`FlatQuadtree.fmm`).
 - `direct_field`: the exact all-pairs sum, for small systems and reference results.
 - `ElectrostaticSimulation`: time integration of `ChargedBody` particles, second order,
-  with a uniform magnetic field `B_z`, absorbing walls and cached fields (one field
-  evaluation per step).
+  with a uniform magnetic field `B_z`, absorbing walls, absorbing objects (any 2D
+  [simgeometry](https://github.com/max-models/simgeometry) shape) and cached fields (one
+  field evaluation per step).
 - `GroundedStripField`: line charges between two grounded plates, by conformal mapping
   and the FMM, including the image force of the plates.
+- `BoundaryIntegralElectrodes`: conductors at prescribed potentials, by the boundary-integral
+  (panel) method; `conductors_from_shape` panels any 2D simgeometry shape (`Circle`,
+  `Polygon`, `Aperture2D`, ...), with optionally graded panel lengths.
 - `ReferenceQuadtree`: a readable object tree computing the same as the flat tree.
 - `tree_d_3d.gravity`: the classic gravitational Barnes-Hut N-body code.
 
 Every kernel has a Pyccel version (compiled on first use, cached in
 `~/.cache/tree-d-3d/kernels`), a NumPy version (used if Pyccel is unavailable), a CUDA version
 for CuPy arrays and a Metal version (float32, via MLX). The array backend comes from
-[cunumpy](https://github.com/max-models/cunumpy).
+[cunumpy](https://github.com/max-models/cunumpy), and electrode and wall geometry from
+[simgeometry](https://github.com/max-models/simgeometry).
 
 Documentation: <https://max-models.github.io/tree-d-3d/>
 
@@ -137,12 +142,14 @@ Child-Langmuir current, profiles and the virtual-cathode transient.
 line charges, their segments as tree sources, a fixed-point loop, validated on the expanding sheet
 beam against its exact parabolic envelope.
 `examples/boundary_integral_electrodes.py` is `BoundaryIntegralElectrodes`, conductors at
-prescribed potentials by the single-layer boundary-integral (panel) method, validated against a
+prescribed potentials by the single-layer boundary-integral (panel) method, built from
+simgeometry `Circle` and `Polygon` shapes, validated against a
 closed-form three-image solution for a grounded circle and the exact profile of a cylindrical
 capacitor.
 `examples/einzel_lens.py` is a practical use of the electrode solver: a 2D slit einzel lens
-focusing a beam of test charges, which turns out *not* to share the round-aperture einzel lens's
-textbook polarity-independence -- both signs focus, but at very different distances.
+built from simgeometry `Aperture2D` plates focusing a beam of test charges. Like a round einzel
+lens it focuses for both polarities, the decelerating one much more strongly: at |V| = 6 the
+focus lies about 11 past the centre electrode, against about 26 for the accelerating one.
 `examples/ion_extraction.py` combines the electrode solver with the tree code's own space-charge
 field: a continuously replenished ion source extracted through a grounded plasma-electrode
 aperture and a biased extractor, showing the beam narrow and then diverge, and the extractor

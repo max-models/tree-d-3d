@@ -3,11 +3,14 @@
 A two-slit extraction system, the 2D analogue of the plasma/extractor electrode pair used
 to pull an ion beam out of a plasma source (as in ``picnic``'s electrode setups): a grounded
 "plasma electrode" with a narrow aperture, a gap, then an "extractor electrode" at a large
-negative bias with a wider aperture. Ions are continuously supplied from a small reservoir
-pressed against the plasma-electrode aperture (representing the plasma meniscus) and are
-pushed by the combined field of the two electrodes (:class:`tree_d_3d.BoundaryIntegralElectrodes`,
-re-solved every step for the electrodes' response to the current ion cloud) and of the other
-ions (:class:`tree_d_3d.FlatQuadtree`'s Barnes-Hut tree walk, log kernel). An ion that is
+negative bias with a wider aperture. Each electrode is a simgeometry ``Aperture2D`` (two
+plates of finite thickness), panelled by :func:`tree_d_3d.conductors_from_shape` with panels
+graded toward the aperture tips, and its ``contains_points`` tells which ions hit a plate.
+Ions are continuously supplied from a small reservoir pressed against the plasma-electrode
+aperture (representing the plasma meniscus) and are pushed by the combined field of the two
+electrodes (:class:`tree_d_3d.BoundaryIntegralElectrodes`, re-solved every step for the
+electrodes' response to the current ion cloud) and of the other ions
+(:class:`tree_d_3d.FlatQuadtree`'s Barnes-Hut tree walk, log kernel). An ion that is
 collected past the extractor or strikes a plate is immediately re-injected at the reservoir,
 so the simulation runs at a fixed particle count and reaches a steady extracted beam rather
 than draining a finite source.
@@ -47,12 +50,13 @@ from pathlib import Path
 import numpy as np
 import plotly.graph_objects as go
 from plasma_plots import save_figure
+from simgeometry import Aperture2D
 
 from tree_d_3d import (
     BoundaryIntegralElectrodes,
-    Conductor,
     FlatQuadtree,
     Quad,
+    conductors_from_shape,
     direct_field,
 )
 
@@ -118,29 +122,38 @@ def _add_player(
     )
 
 
-def slit_electrode(
-    x: float, potential: float, n: int, half_aperture: float
-) -> list[Conductor]:
-    """Two plate conductors (above and below the aperture) forming a slit at ``x``.
+def slit_electrode(x: float, half_aperture: float) -> Aperture2D:
+    """The two plates (above and below the aperture) of a slit electrode centred at ``x``.
 
-    Panels are graded by ``t**1.5`` along each plate: denser near the aperture tip, where the
-    field varies fastest, but not as aggressively as a steeper grading would, since ions pass
-    close to that tip and the panel method's point-charge approximation (see
-    :mod:`tree_d_3d.electrodes`) needs each panel's own length to stay comparable to the ions'
-    softening length there.
+    A simgeometry ``Aperture2D``: each plate is ``THICKNESS`` thick and ``PLATE_LENGTH``
+    long, its tip ``half_aperture`` off the axis.
     """
-    t = np.linspace(0, 1, n + 1) ** 1.5
-    y = half_aperture + PLATE_LENGTH * t
-    upper = np.stack((np.full(n + 1, x), y))
-    lower = np.stack((np.full(n + 1, x), -y))
-    return [
-        Conductor(upper, potential, closed=False),
-        Conductor(lower, potential, closed=False),
-    ]
+    x0, x1 = x - 0.5 * THICKNESS, x + 0.5 * THICKNESS
+    a, b = half_aperture, half_aperture + PLATE_LENGTH
+    return Aperture2D(
+        axis=0, position=0.0, vertices=((x0, a), (x1, a), (x1, b), (x0, b))
+    )
+
+
+def panel_length(tip_panel: float, half_aperture: float):
+    """Panel lengths graded from ``tip_panel`` at the aperture tip to ``THICKNESS``.
+
+    Short panels where the field varies fastest, but not much shorter than the ions'
+    softening length there: ions pass close to the tip, and the panel method's point-charge
+    approximation (see :mod:`tree_d_3d.electrodes`) needs each panel's own length to stay
+    comparable to it. The cap keeps panels shorter than the gap across the plate.
+    """
+
+    def length(points: np.ndarray) -> np.ndarray:
+        distance = np.maximum(np.abs(points[1]) - half_aperture, 0.0)
+        return np.minimum(tip_panel + 0.1 * distance, THICKNESS)
+
+    return length
 
 
 A0, A1 = 0.6, 1.0  # plasma-electrode, extractor-electrode aperture half-widths
 PLATE_LENGTH = 10.0
+THICKNESS = 0.4
 GAP = 4.0  # plasma electrode to extractor
 X0, X1 = 0.0, GAP
 RESERVOIR_X = (-1.5, -0.3)  # ion source, pressed against the plasma-electrode aperture
@@ -165,16 +178,25 @@ class ExtractionSource:
         *,
         v_ext: float,
         x_final: float,
-        n_panels: int,
+        tip_panel: float,
         leaf_capacity: int = 16,
         theta: float = 0.6,
         seed: int = 0,
     ) -> None:
         self.n, self.q, self.x_final = n, q, x_final
         self.leaf_capacity, self.theta = leaf_capacity, theta
-        conductors = slit_electrode(X0, 0.0, n_panels, A0) + slit_electrode(
-            X1, -v_ext, n_panels, A1
-        )
+        #: the plasma electrode and the extractor, as ``(x, half-aperture, shape)``
+        self.plates = [
+            (X0, A0, slit_electrode(X0, A0)),
+            (X1, A1, slit_electrode(X1, A1)),
+        ]
+        conductors = [
+            conductor
+            for (_, half_ap, shape), potential in zip(self.plates, (0.0, -v_ext))
+            for conductor in conductors_from_shape(
+                shape, potential, panel_length(tip_panel, half_ap)
+            )
+        ]
         self.electrodes = BoundaryIntegralElectrodes(conductors, k_e=K_E)
         self.rng = np.random.default_rng(seed)
         self.charge = np.full(n, q)
@@ -224,10 +246,13 @@ class ExtractionSource:
         x_prev = self.pos[0].copy()
         self.pos = self.pos + DT * self.vel
 
+        # inside a plate at the end of the step, or through its mid-plane outside the
+        # aperture during it (so a fast ion cannot step over a plate)
         hit_plate = np.zeros(self.pos.shape[1], dtype=bool)
-        for x_e, half_ap in ((X0, A0), (X1, A1)):
+        for x_e, half_ap, shape in self.plates:
             crossed = (x_prev - x_e) * (self.pos[0] - x_e) <= 0
             hit_plate |= crossed & (np.abs(self.pos[1]) > half_ap)
+            hit_plate |= np.asarray(shape.contains_points(self.pos), dtype=bool)
         collected = self.pos[0] > self.x_final
         off_axis = np.abs(self.pos[1]) > PLATE_LENGTH + max(A0, A1) + 2
         back = self.pos[0] < RESERVOIR_X[0] - 1.0
@@ -253,24 +278,40 @@ class ExtractionSource:
         return self.n_collected / total if total else float("nan")
 
 
+def add_plates(fig: go.Figure, source: ExtractionSource, color: str = "black") -> None:
+    """Draw the electrode plates as filled polygons from their simgeometry outlines."""
+    for _, _, shape in source.plates:
+        for loop in shape.outlines():
+            fig.add_trace(
+                go.Scatter(
+                    x=np.append(loop[0], loop[0, 0]),
+                    y=np.append(loop[1], loop[1, 0]),
+                    mode="lines",
+                    fill="toself",
+                    fillcolor=color,
+                    line={"color": color, "width": 1},
+                    showlegend=False,
+                )
+            )
+
+
 # -- 1: geometry -----------------------------------------------------------------------------
 
 
-def plot_geometry(output: Path, v_ext: float) -> None:
+def plot_geometry(output: Path, source: ExtractionSource, v_ext: float) -> None:
     """Figure 1."""
-    conductors = slit_electrode(X0, 0.0, 30, A0) + slit_electrode(X1, -v_ext, 30, A1)
     fig = go.Figure()
-    for conductor in conductors:
-        v = conductor.vertices
-        fig.add_trace(
-            go.Scatter(
-                x=v[0],
-                y=v[1],
-                mode="lines",
-                line={"color": MPL_COLORS["C0"], "width": 3},
-                showlegend=False,
-            )
+    add_plates(fig, source, MPL_COLORS["C0"])
+    midpoints = source.electrodes.midpoints
+    fig.add_trace(
+        go.Scatter(
+            x=midpoints[0],
+            y=midpoints[1],
+            mode="markers",
+            marker={"size": 3, "color": "black"},
+            name=f"panel midpoints ({source.electrodes.num_panels})",
         )
+    )
     for x, v, label in ((X0, 0.0, "plasma electrode"), (X1, -v_ext, "extractor")):
         fig.add_annotation(
             x=x, y=PLATE_LENGTH + 2.0, text=f"{label}<br>V = {v:g}", showarrow=False
@@ -302,17 +343,7 @@ def plot_beam_snapshot(
             showlegend=False,
         )
     )
-    for conductor in source.electrodes.conductors:
-        v = conductor.vertices
-        fig.add_trace(
-            go.Scatter(
-                x=v[0],
-                y=v[1],
-                mode="lines",
-                line={"color": "black", "width": 3},
-                showlegend=False,
-            )
-        )
+    add_plates(fig, source)
     fig.update_xaxes(title_text="x", showgrid=False)
     fig.update_yaxes(title_text="y", scaleanchor="x", showgrid=False)
     fig.update_layout(
@@ -348,6 +379,9 @@ def plot_envelope(
             np.add.at(count_sum, idx[valid], 1)
     with np.errstate(invalid="ignore", divide="ignore"):
         rms = np.sqrt(sq_sum / count_sum)
+    for x_probe in (X0, 0.5 * (X0 + X1), X1, source.x_final - 1.0):
+        i = min(np.searchsorted(edges, x_probe) - 1, bins - 1)
+        print(f"  rms half-width at x = {centers[i]:.1f}: {rms[i]:.3f}")
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(
@@ -378,14 +412,14 @@ def plot_transmission_scaling(
     *,
     n: int,
     v_ext: float,
-    n_panels: int,
+    tip_panel: float,
     burst_steps: int,
 ) -> None:
     """Figure 4."""
     transmission = []
     for q in charges:
         source = ExtractionSource(
-            n, float(q), v_ext=v_ext, x_final=X1 + 12.0, n_panels=n_panels, seed=1
+            n, float(q), v_ext=v_ext, x_final=X1 + 12.0, tip_panel=tip_panel, seed=1
         )
         for _ in range(burst_steps):
             source.step()
@@ -426,17 +460,7 @@ def animate_beam_formation(
             showlegend=False,
         )
     )
-    for conductor in source.electrodes.conductors:
-        v = conductor.vertices
-        fig.add_trace(
-            go.Scatter(
-                x=v[0],
-                y=v[1],
-                mode="lines",
-                line={"color": "black", "width": 3},
-                showlegend=False,
-            )
-        )
+    add_plates(fig, source)
     fig.update_xaxes(
         title_text="x", range=[RESERVOIR_X[0] - 1, source.x_final + 1], showgrid=False
     )
@@ -485,26 +509,26 @@ def main(argv: list[str] | None = None) -> Path:
     v_ext = 8.0
     x_final = X1 + 12.0
     if args.smoke:
-        n, n_panels, burst, avg, bins = 60, 8, 20, 10, 6
+        n, tip_panel, burst, avg, bins = 60, 0.4, 20, 10, 6
         charges = np.array([1 / 400, 1 / 100])
         frames, steps_per_frame = 3, 3
     elif args.quick:
-        n, n_panels, burst, avg, bins = 400, 15, 250, 100, 20
+        n, tip_panel, burst, avg, bins = 400, 0.25, 250, 100, 20
         charges = np.array([1 / 2000, 1 / 1000, 1 / 600, 1 / 400, 1 / 250])
         frames, steps_per_frame = 15, 6
     else:
-        n, n_panels, burst, avg, bins = 1500, 30, 600, 300, 40
+        n, tip_panel, burst, avg, bins = 1500, 0.15, 600, 300, 40
         charges = np.array([1 / 2000, 1 / 1200, 1 / 800, 1 / 500, 1 / 350, 1 / 250])
         frames, steps_per_frame = 40, 8
 
-    print("1. geometry")
-    plot_geometry(output, v_ext)
-
-    print("2. beam snapshot")
     q = 1 / 500
     source = ExtractionSource(
-        n, q, v_ext=v_ext, x_final=x_final, n_panels=n_panels, seed=2
+        n, q, v_ext=v_ext, x_final=x_final, tip_panel=tip_panel, seed=2
     )
+    print(f"1. geometry ({source.electrodes.num_panels} panels)")
+    plot_geometry(output, source, v_ext)
+
+    print("2. beam snapshot")
     plot_beam_snapshot(output, source, burst)
 
     print("3. envelope")
@@ -514,7 +538,7 @@ def main(argv: list[str] | None = None) -> Path:
 
     print("4. transmission scaling")
     plot_transmission_scaling(
-        output, charges, n=n, v_ext=v_ext, n_panels=n_panels, burst_steps=burst
+        output, charges, n=n, v_ext=v_ext, tip_panel=tip_panel, burst_steps=burst
     )
 
     print("5. beam formation")
@@ -523,7 +547,7 @@ def main(argv: list[str] | None = None) -> Path:
         q,
         v_ext=v_ext,
         x_final=x_final,
-        n_panels=n_panels,
+        tip_panel=tip_panel,
         seed=3,
     )
     animate_beam_formation(

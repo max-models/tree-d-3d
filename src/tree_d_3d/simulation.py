@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING
 
 import cunumpy as xp
 import numpy as np
@@ -13,6 +14,9 @@ from tree_d_3d.constants import K_E
 from tree_d_3d.flat_tree import FlatQuadtree, direct_field
 from tree_d_3d.kernels import _kernels, kernels_compiled
 from tree_d_3d.quad import Quad
+
+if TYPE_CHECKING:
+    from simgeometry.shapes import Shape
 
 #: ``method="auto"`` sums pairs directly up to this many charged particles.
 DIRECT_THRESHOLD: int = 1000
@@ -42,11 +46,25 @@ def _parse_walls(walls: Mapping[str, float]) -> list[tuple[str, int, int, float]
     return parsed
 
 
+def _parse_objects(objects: Mapping[str, Shape]) -> dict[str, Shape]:
+    for name, shape in objects.items():
+        if not isinstance(name, str) or not name:
+            raise ValueError("Absorbing objects need nonempty string names")
+        if name in _WALLS:
+            raise ValueError(f"{name!r} is a wall name; name the object differently")
+        if getattr(shape, "ndim", None) != 2 or not hasattr(shape, "contains_points"):
+            raise ValueError(
+                f"Absorbing object {name!r} must be a 2D simgeometry shape"
+            )
+    return dict(objects)
+
+
 class AbsorbedParticles:
-    """Particles removed at absorbing walls, in removal order.
+    """Particles removed at absorbing walls and objects, in removal order.
 
     Positions and velocities are taken just after the drift that crossed the
-    wall, so positions lie up to one step beyond it; ``time`` is the end of
+    wall or entered the object, so positions lie up to one step beyond the
+    boundary; ``wall`` names the wall or object; ``time`` is the end of
     that step. ``position`` and ``velocity`` are ``(2, M)`` (component-major).
     The bodies themselves are kept in :attr:`bodies`, detached from the
     simulation.
@@ -55,7 +73,7 @@ class AbsorbedParticles:
     def __init__(self) -> None:
         self.bodies: list[ChargedBody] = []
         self.time = np.zeros(0)
-        self.wall = np.zeros(0, dtype="<U5")
+        self.wall = np.zeros(0, dtype=str)
         self.position = np.zeros((2, 0))
         self.velocity = np.zeros((2, 0))
         self.mass = np.zeros(0)
@@ -64,7 +82,7 @@ class AbsorbedParticles:
     def record(self, bodies, *, time, walls, positions, velocities, masses, charges):
         self.bodies.extend(bodies)
         self.time = np.append(self.time, np.full(len(bodies), time))
-        self.wall = np.append(self.wall, np.asarray(walls, dtype="<U5"))
+        self.wall = np.append(self.wall, np.asarray(walls, dtype=str))
         self.position = np.hstack((self.position, positions))
         self.velocity = np.hstack((self.velocity, velocities))
         self.mass = np.append(self.mass, masses)
@@ -80,7 +98,7 @@ class AbsorbedParticles:
         return float(0.5 * np.sum(self.mass * np.sum(self.velocity**2, axis=0)))
 
     def counts(self) -> dict[str, int]:
-        """Number of particles absorbed at each wall."""
+        """Number of particles absorbed at each wall and object."""
         names, counts = np.unique(self.wall, return_counts=True)
         return {str(name): int(count) for name, count in zip(names, counts)}
 
@@ -109,6 +127,14 @@ class ElectrostaticSimulation:
     is removed before the end-of-step field evaluation and stops acting as a
     source; see :attr:`absorbed`. Walls only remove particles: the field
     stays free-space, with no image charges or wall potential.
+
+    ``absorbing_objects`` maps names to 2D :mod:`simgeometry` shapes (a
+    ``Circle``, ``Polygon``, ``Aperture2D``, ...). A particle that ends a drift
+    inside one is removed the same way and recorded under its name; an
+    inverted shape absorbs everything outside it, such as a round chamber
+    wall. Only end points are tested, so keep ``|v| dt`` below the thickness of
+    the thinnest object. Like walls, objects do not change the field: for
+    electrodes, pair them with :class:`tree_d_3d.BoundaryIntegralElectrodes`.
 
     ``kernel="log"`` makes every particle an infinite line charge per unit
     length along z, the interaction of 2D Cartesian PIC, instead of a point
@@ -155,16 +181,22 @@ class ElectrostaticSimulation:
         self._tree = None
 
     def _outside_walls(self) -> tuple[np.ndarray, np.ndarray]:
-        """Mask of particles beyond a wall, and the deepest wall crossed."""
+        """Mask of absorbed particles, and the name of the deepest wall crossed or object entered.
+
+        Walls take precedence over objects.
+        """
         n = self.num_particles
         depth = np.zeros(n)
-        wall = np.full(n, -1)
-        for k, (_, axis, sign, value) in enumerate(self._walls):
+        name = np.full(n, "", dtype=object)
+        for wall, axis, sign, value in self._walls:
             beyond = sign * (self.positions[axis] - value)
             deeper = beyond > depth
             depth[deeper] = beyond[deeper]
-            wall[deeper] = k
-        return wall >= 0, wall
+            name[deeper] = wall
+        for obj, shape in self._objects.items():
+            inside = _host(shape.contains_points(self.positions)).astype(bool)
+            name[inside & (name == "")] = obj
+        return name != "", name
 
     def __init__(
         self,
@@ -181,6 +213,7 @@ class ElectrostaticSimulation:
         method: str = "auto",
         direct_threshold: int = DIRECT_THRESHOLD,
         absorbing_walls: Mapping[str, float] | None = None,
+        absorbing_objects: Mapping[str, Shape] | None = None,
         kernel: str = "coulomb",
         order: int = 18,
         reference_radius: float = 1.0,
@@ -231,12 +264,16 @@ class ElectrostaticSimulation:
         self.current_time = 0.0
         self.iteration = 0
         self._walls = _parse_walls(absorbing_walls or {})
+        self._objects = _parse_objects(absorbing_objects or {})
         self._adopt()
         #: Removed particles with their state just after crossing a wall.
         self.absorbed = AbsorbedParticles()
         outside, _ = self._outside_walls()
         if np.any(outside):
-            raise ValueError("Particles must start inside the absorbing walls")
+            raise ValueError(
+                "Particles must start inside the absorbing walls and outside the "
+                "absorbing objects"
+            )
 
     @property
     def num_particles(self) -> int:
@@ -246,20 +283,24 @@ class ElectrostaticSimulation:
     def absorbing_walls(self) -> dict[str, float]:
         return {name: value for name, _, _, value in self._walls}
 
+    @property
+    def absorbing_objects(self) -> dict[str, Shape]:
+        return dict(self._objects)
+
     def _absorb(self) -> None:
-        """Remove particles beyond a wall and record them."""
-        if not self._walls:
+        """Remove particles beyond a wall or inside an object and record them."""
+        if not self._walls and not self._objects:
             return
         if len(self.bodies) != self.num_particles:
             self._adopt()
-        outside, wall = self._outside_walls()
+        outside, name = self._outside_walls()
         if not np.any(outside):
             return
         removed = np.flatnonzero(outside)
         self.absorbed.record(
             [self.bodies[i] for i in removed],
             time=self.current_time + self.dt,
-            walls=[self._walls[k][0] for k in wall[removed]],
+            walls=list(name[removed]),
             positions=self.positions[:, removed],
             velocities=self.velocities[:, removed],
             masses=self.masses[removed],

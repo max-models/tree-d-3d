@@ -1,32 +1,32 @@
-"""A slit (2D) einzel lens: why the round-aperture "focuses either way" rule weakens here.
+"""A slit (2D) einzel lens: both polarities focus, the decelerating one much more strongly.
 
 A practical use of :class:`tree_d_3d.BoundaryIntegralElectrodes`, as opposed to
 ``examples/boundary_integral_electrodes.py``'s closed-form validation cases: three slit
 electrodes on the beam axis, the outer two grounded and the centre one held at a lens
 voltage, act on a beam of test charges -- the two-dimensional (slit, not round-aperture)
-analogue of the einzel lenses used in real ion-source LEBTs. Rays are traced through the
-static field by a plain RK4 push (ballistic: no self space charge, one lens voltage held
-fixed), the same approximation IBSimu and `BeamOptics` make for linear-optics design.
+analogue of the einzel lenses used in real ion-source LEBTs. Each electrode is a
+:class:`simgeometry.Aperture2D`, two plates of finite thickness, panelled by
+:func:`tree_d_3d.conductors_from_shape` with panels graded from short at the aperture tips
+(where the field varies fastest) to about the plate thickness far from the axis. Rays are
+traced through the static field by a plain RK4 push (ballistic: no self space charge, one
+lens voltage held fixed), the same approximation IBSimu and `BeamOptics` make for
+linear-optics design.
 
-The textbook einzel (unipotential) lens result is that a round-aperture lens focuses a
-beam *regardless of the sign* of the centre electrode's voltage, with equal strength for
-either sign, because the paraxial ray equation reduces to a Sturm-Liouville form with an
-unconditionally positive restoring term ``(V'/V)^2`` that is also exactly even in the
-voltage -- a term that comes specifically from the ``1/r`` curvature of the cylindrically
-symmetric Laplacian. A 2D slit lens has no such term (a Cartesian Laplacian has no
-curvature in the transverse direction), so there is no guarantee of either property. This
-example checks that directly: both polarities do still focus the beam at the voltages and
-beam energy tried here, but at very different distances -- decelerating the beam (for a
-positive test charge, a positive centre voltage: naively repulsive) gives a *much*
-stronger lens than accelerating it by the same voltage, because a decelerated particle
-spends longer near the lens, where the transverse field acts on it, than an accelerated
-one does. The round-aperture lens's clean sign-symmetry does not transfer to the slit.
+The textbook einzel (unipotential) lens converges a beam for either sign of the centre
+electrode's voltage, but not equally: the decelerating polarity (for a positive test
+charge, a positive centre voltage) is considerably stronger than the accelerating one at
+the same voltage magnitude, because a decelerated particle spends longer in the lens
+field (see e.g. Hawkes & Kasper, *Principles of Electron Optics*, or Szilagyi,
+*Electron and Ion Optics*). This is usually stated for round apertures; this example
+checks that the slit lens reproduces the same behaviour: both polarities focus the beam at the voltages and
+beam energy tried here, the decelerating one at less than half the distance past the
+centre electrode (about 11 against 26 at ``|V| = 6``, beam energy 12.5).
 
 1. ``geometry``: the three slit electrodes and their potentials.
 2. ``focusing_trajectories``: rays converging to a focus for the decelerating polarity.
 3. ``polarity_asymmetry``: the same rays for both polarities of equal magnitude -- both
-   converge, but the decelerating one focuses several times closer than the accelerating
-   one, unlike the round-aperture lens's sign-symmetric strength.
+   converge, but the decelerating one focuses less than half as far past the centre
+   electrode as the accelerating one, as for a round-aperture einzel lens.
 4. ``energy_conservation``: the kinetic energy of the decelerating-case ray along its
    path, from well upstream of the lens to a symmetric point downstream (the two
    electrodes are not individually neutral, so the solved field has a net monopole and
@@ -56,8 +56,9 @@ from pathlib import Path
 import numpy as np
 import plotly.graph_objects as go
 from plasma_plots import save_figure
+from simgeometry import Aperture2D
 
-from tree_d_3d import BoundaryIntegralElectrodes, Conductor
+from tree_d_3d import BoundaryIntegralElectrodes, Conductor, conductors_from_shape
 
 COLORS = {"C0": "#1f77b4", "C1": "#ff7f0e", "C2": "#2ca02c", "C3": "#d62728"}
 K_E = 1.0  # code units
@@ -66,34 +67,45 @@ HALF_APERTURE = 0.5
 GAP = 3.0
 ELECTRODE_X = (0.0, GAP, 2 * GAP)
 PLATE_LENGTH = 15.0
+PLATE_THICKNESS = 0.2
+PANEL_GRADE = 0.1  # panel length grows by this much per unit distance from the tip
 VX0 = 5.0  # beam speed (q = m = 1, so KE0 = 12.5; stay well below that for V_lens)
 START_X = -10.0  # upstream of the first electrode, where the field is small
 
 
-def slit_electrode(
-    x: float, potential: float, n: int, grade: float = 2.0
-) -> list[Conductor]:
-    """Two plate conductors (above and below the aperture) forming a slit at ``x``.
+def slit_electrode(x: float, potential: float, tip_panel: float) -> list[Conductor]:
+    """The two plates (above and below the aperture) of a slit electrode centred at ``x``.
 
-    Panels are graded (denser near the aperture tip, where the field varies fastest) by
-    ``t**grade`` spacing along each plate.
+    Panels are ``tip_panel`` long at the aperture tip and grow by ``PANEL_GRADE`` per unit
+    distance along the plate, up to the plate thickness, so that no panel is longer than
+    the gap across the plate (see :func:`tree_d_3d.conductors_from_shape`).
     """
-    t = np.linspace(0, 1, n + 1) ** grade
-    y = HALF_APERTURE + PLATE_LENGTH * t
-    upper = np.stack((np.full(n + 1, x), y))
-    lower = np.stack((np.full(n + 1, x), -y))
-    return [
-        Conductor(upper, potential, closed=False),
-        Conductor(lower, potential, closed=False),
-    ]
+    half = 0.5 * PLATE_THICKNESS
+    top = HALF_APERTURE + PLATE_LENGTH
+    aperture = Aperture2D(
+        axis=0,
+        position=0.0,
+        vertices=(
+            (x - half, HALF_APERTURE),
+            (x + half, HALF_APERTURE),
+            (x + half, top),
+            (x - half, top),
+        ),
+    )
+
+    def panel_length(points: np.ndarray) -> np.ndarray:
+        from_tip = np.abs(points[1]) - HALF_APERTURE
+        return np.minimum(tip_panel + PANEL_GRADE * from_tip, PLATE_THICKNESS)
+
+    return conductors_from_shape(aperture, potential, panel_length)
 
 
-def build_lens(v_lens: float, n: int) -> BoundaryIntegralElectrodes:
+def build_lens(v_lens: float, tip_panel: float) -> BoundaryIntegralElectrodes:
     """The three-slit lens: outer electrodes grounded, centre one at ``v_lens``."""
     conductors = (
-        slit_electrode(ELECTRODE_X[0], 0.0, n)
-        + slit_electrode(ELECTRODE_X[1], v_lens, n)
-        + slit_electrode(ELECTRODE_X[2], 0.0, n)
+        slit_electrode(ELECTRODE_X[0], 0.0, tip_panel)
+        + slit_electrode(ELECTRODE_X[1], v_lens, tip_panel)
+        + slit_electrode(ELECTRODE_X[2], 0.0, tip_panel)
     )
     lens = BoundaryIntegralElectrodes(conductors, k_e=K_E)
     lens.solve()  # no free charges: the test rays are ballistic probes, not sources
@@ -161,11 +173,11 @@ def main(argv: list[str] | None = None) -> Path:
     output.mkdir(parents=True, exist_ok=True)
 
     if args.smoke:
-        n_panels, scan_voltages, dt = 10, (3.0, 6.0, 9.0), 0.02
+        tip_panel, scan_voltages, dt = 0.1, (3.0, 6.0, 9.0), 0.02
     elif args.quick:
-        n_panels, scan_voltages, dt = 25, np.linspace(3, 9, 7), 0.005
+        tip_panel, scan_voltages, dt = 0.03, np.linspace(3, 9, 7), 0.005
     else:
-        n_panels, scan_voltages, dt = 50, np.linspace(3, 9, 13), 0.002
+        tip_panel, scan_voltages, dt = 0.015, np.linspace(3, 9, 13), 0.002
     v_decel, v_accel = 6.0, -6.0
     x_final = 45.0
     x_final_energy = (
@@ -174,23 +186,26 @@ def main(argv: list[str] | None = None) -> Path:
     y0s = (0.05, 0.1, 0.15, 0.2, 0.25)
 
     # 1. geometry
-    lens = build_lens(v_decel, n_panels)
+    lens = build_lens(v_decel, tip_panel)
+    print(f"{lens.num_panels} panels ({tip_panel:g} at the aperture tips)")
     fig = go.Figure()
     for conductor in lens.conductors:
-        v = conductor.vertices
+        v = np.concatenate((conductor.vertices, conductor.vertices[:, :1]), axis=1)
         fig.add_trace(
             go.Scatter(
                 x=v[0],
                 y=v[1],
                 mode="lines",
-                line={"color": COLORS["C0"], "width": 3},
+                fill="toself",
+                line={"color": COLORS["C0"], "width": 1},
                 showlegend=False,
             )
         )
     for x, v in zip(ELECTRODE_X, (0.0, v_decel, 0.0), strict=True):
         fig.add_annotation(
-            x=x,
+            x=x + 0.15,
             y=3.5,
+            xanchor="left",
             text=f"V = {v:g}",
             showarrow=False,
         )
@@ -239,7 +254,7 @@ def main(argv: list[str] | None = None) -> Path:
         (v_decel, COLORS["C0"], "solid", "decelerating, strong"),
         (v_accel, COLORS["C3"], "dash", "accelerating, weak"),
     ):
-        lens_v = build_lens(v_lens, n_panels)
+        lens_v = build_lens(v_lens, tip_panel)
         crossings_v = []
         for i, y0 in enumerate(y0s):
             xs, _ = trace(lens_v, y0, VX0, x_final, dt)
@@ -297,7 +312,7 @@ def main(argv: list[str] | None = None) -> Path:
     fig = go.Figure()
     focal = []
     for v in scan_voltages:
-        lens_v = build_lens(float(v), n_panels)
+        lens_v = build_lens(float(v), tip_panel)
         xs, _ = trace(lens_v, y0s[1], VX0, x_final, dt)
         crossing = focus_crossing(xs)
         focal.append(crossing - ELECTRODE_X[1] if np.isfinite(crossing) else np.nan)
