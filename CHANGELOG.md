@@ -7,6 +7,13 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Examples beyond the tree code's home ground, each checked against a closed form or an analytic
+  rate: charge-exchange ions and grid erosion in an ion-thruster grid set
+  (`cex_grid_erosion.py`), a multipactor susceptibility chart (`multipactor.py`), a reflectron
+  time-of-flight mass spectrometer (`reflectron_tof.py`), a planar Pierce gun (`pierce_gun.py`)
+  and an ion-mobility drift tube (`drift_tube_mobility.py`). plasmacoll joins the `examples`
+  extra for their collisions.
+
 - simgeometry is a dependency. `conductors_from_shape` turns any 2D simgeometry shape into
   `BoundaryIntegralElectrodes` conductors, with constant or graded panel lengths.
 - `ElectrostaticSimulation(absorbing_objects={name: shape})` removes particles that end a
@@ -25,6 +32,8 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- `conductors_from_shape` keeps an open curve (a simgeometry `Polyline`) an open conductor
+  instead of closing it.
 - The einzel-lens example no longer claims round einzel lenses focus equally for both
   polarities.
 

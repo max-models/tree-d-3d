@@ -149,3 +149,13 @@ def test_polygon_conductor_interior_converges_to_equipotential_and_field_free():
         errors.append(max(np.abs(phi - 1.0).max(), np.abs(field).max()))
     assert errors[1] < 5e-3
     assert errors[0] / errors[1] == pytest.approx(2.0, rel=0.1)
+
+
+def test_an_open_polyline_becomes_an_open_conductor():
+    from simgeometry import Polyline
+
+    plate = Polyline([(0.0, 0.0), (1.0, 0.0)])
+    (conductor,) = conductors_from_shape(plate, 1.0, 0.1)
+    assert conductor.closed is False
+    electrodes = BoundaryIntegralElectrodes([conductor], k_e=1.0)
+    assert electrodes.num_panels == conductor.vertices.shape[1] - 1 == 10
