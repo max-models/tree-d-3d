@@ -155,6 +155,24 @@ field: a continuously replenished ion source extracted through a grounded plasma
 aperture and a biased extractor, showing the beam narrow and then diverge, and the extractor
 intercept a growing share of it as the beam's own space charge grows -- a space-charge-limited
 extraction.
+`examples/cex_grid_erosion.py` follows the slow ions that resonant charge exchange leaves behind a
+xenon ion-thruster beam through a three-grid slit geometry, finding where they hit with
+simgeometry's `crossings()` so that none step through a plate. It maps their flux and an estimated
+sputter erosion onto each face of the accel grid (the aperture barrel wears fastest) and shows the
+charge-exchange current growing linearly with neutral pressure until the beam attenuates.
+`examples/multipactor.py` builds the two-surface multipactor susceptibility chart from simulation:
+plates from simgeometry solved by the panel method, wall impacts from `crossings()` and Vaughan's
+secondary-emission yield carried as electron weights. Every simulated growth point lies inside the
+zone of the constant-emission-velocity resonance theory drawn over the chart.
+`examples/reflectron_tof.py` is a gridless reflectron time-of-flight mass spectrometer from
+simgeometry slits: its traced energy focusing matches Mamyrin's condition `qEL = 4 U0` to 0.5%, and
+it resolves masses 100--102 u that a linear instrument merges.
+`examples/pierce_gun.py` is a planar Pierce electron gun from simgeometry polylines, solved by a
+gun iteration without a mesh: it holds the Child-Langmuir potential and current and keeps the beam
+parallel where a flat diode lets it spread.
+`examples/drift_tube_mobility.py` is an ion-mobility drift tube with plasmacoll collisions,
+reproducing the polarization-limit mobility, Einstein's diffusion and the diffusion-limited
+resolving power.
 
 ## Development
 

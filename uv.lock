@@ -3013,6 +3013,17 @@ plotly = [
 ]
 
 [[package]]
+name = "plasmacoll"
+version = "0.1.0"
+source = { git = "https://github.com/max-models/plasmacoll?rev=devel#a5997f068c019e22a94a62296077688246d8a7c8" }
+dependencies = [
+    { name = "cunumpy" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
+    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+]
+
+[[package]]
 name = "platformdirs"
 version = "4.12.3"
 source = { registry = "https://pypi.org/simple" }
@@ -4368,6 +4379,7 @@ dev = [
     { name = "nbclient" },
     { name = "nbformat" },
     { name = "plasma-plots", extra = ["plotly"] },
+    { name = "plasmacoll" },
     { name = "pre-commit" },
     { name = "pyproject-fmt" },
     { name = "pyright" },
@@ -4382,9 +4394,11 @@ docs = [
     { name = "nbclient" },
     { name = "nbformat" },
     { name = "plasma-plots", extra = ["plotly"] },
+    { name = "plasmacoll" },
 ]
 examples = [
     { name = "plasma-plots", extra = ["plotly"] },
+    { name = "plasmacoll" },
 ]
 gpu = [
     { name = "cupy-cuda12x" },
@@ -4394,6 +4408,7 @@ metal = [
 ]
 test = [
     { name = "plasma-plots", extra = ["plotly"] },
+    { name = "plasmacoll" },
     { name = "pytest" },
     { name = "pytest-cov" },
 ]
@@ -4410,8 +4425,9 @@ requires-dist = [
     { name = "nbformat", marker = "extra == 'docs'", specifier = ">=5.10" },
     { name = "numpy" },
     { name = "plasma-plots", extras = ["plotly"], marker = "extra == 'examples'" },
+    { name = "plasmacoll", marker = "extra == 'examples'", git = "https://github.com/max-models/plasmacoll?rev=devel" },
     { name = "pre-commit", marker = "extra == 'dev'" },
-    { name = "pyccel", specifier = ">2.0" },
+    { name = "pyccel", specifier = ">2" },
     { name = "pyproject-fmt", marker = "extra == 'dev'" },
     { name = "pyright", marker = "extra == 'dev'" },
     { name = "pytest", marker = "extra == 'test'" },
@@ -4419,11 +4435,11 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'" },
     { name = "scipy" },
     { name = "simgeometry", git = "https://github.com/max-models/simgeometry?rev=devel" },
+    { name = "tree-d-3d", extras = ["docs", "examples", "test"], marker = "extra == 'dev'" },
     { name = "tree-d-3d", extras = ["examples"], marker = "extra == 'docs'" },
     { name = "tree-d-3d", extras = ["examples"], marker = "extra == 'test'" },
-    { name = "tree-d-3d", extras = ["test", "docs", "examples"], marker = "extra == 'dev'" },
 ]
-provides-extras = ["dev", "examples", "docs", "gpu", "metal", "test"]
+provides-extras = ["dev", "docs", "examples", "gpu", "metal", "test"]
 
 [[package]]
 name = "typing-extensions"

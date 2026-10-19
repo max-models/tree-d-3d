@@ -12,5 +12,10 @@
   "boundary-integral-electrodes": 1,
   "einzel-lens": 1,
   "conserving-tree-code": 0.5,
-  "rational-far-field": 0.5
+  "rational-far-field": 0.5,
+  "cex-grid-erosion": 0.5,
+  "multipactor": 0.5,
+  "reflectron-tof": 0.5,
+  "pierce-gun": 0.5,
+  "drift-tube-mobility": 1
 }

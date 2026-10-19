@@ -63,14 +63,19 @@ def conductors_from_shape(
     """Closed conductors on the boundary of a 2D :mod:`simgeometry` shape.
 
     One :class:`Conductor` per boundary loop of ``shape.outlines(max_panel_length)``
-    (an ``Aperture2D`` gives two, one per plate), all held at ``potential``. Panels are
+    (an ``Aperture2D`` gives two, one per plate), all held at ``potential``; an open
+    curve such as a ``Polyline`` (a plate of zero thickness) gives an open conductor. Panels are
     at most ``max_panel_length`` long; it can also be a function of ``(2, m)`` points
     returning ``(m,)`` lengths, to grade the panels (short where the field varies
     fastest, such as an aperture tip). Keep panels shorter than the gaps between
     surfaces, a plate's thickness included: the off-diagonal entries treat each panel
     as a point charge at its midpoint.
     """
-    return [Conductor(loop, potential) for loop in shape.outlines(max_panel_length)]
+    closed = bool(getattr(shape, "closed", True))
+    return [
+        Conductor(loop, potential, closed=closed)
+        for loop in shape.outlines(max_panel_length)
+    ]
 
 
 class BoundaryIntegralElectrodes:

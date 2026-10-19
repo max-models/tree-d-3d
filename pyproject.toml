@@ -37,7 +37,10 @@ optional-dependencies.dev = [
   "ruff",
   "tree-d-3d[test,docs,examples]",
 ]
-optional-dependencies.examples = [ "plasma-plots[plotly]" ]
+optional-dependencies.examples = [
+  "plasma-plots[plotly]",
+  "plasmacoll @ git+https://github.com/max-models/plasmacoll@devel",
+]
 optional-dependencies.docs = [
   "griffe",
   "ipykernel",
