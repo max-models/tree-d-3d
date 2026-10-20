@@ -16,8 +16,8 @@ analytic theory, and then compares it with the theory:
   :class:`tree_d_3d.BoundaryIntegralElectrodes`; the RF field is that static solution
   times ``V0 sin(omega t)``, the quasi-static approximation (the gap, at most a few
   millimetres, is far smaller than the RF wavelength of tens of centimetres). It is
-  tabulated in the gap for interpolation and held, within one panel length of a plate,
-  at its value one panel off it, where the panel method's midpoint rule is accurate;
+  tabulated in the gap by :meth:`~tree_d_3d.BoundaryIntegralElectrodes.tabulate`, accurate
+  up to the plate surfaces since panels near a point enter with their exact field;
 * electrons are pushed nonrelativistically (impact energies stay below a few keV, well
   under the 511 keV rest energy) by a velocity-Verlet step in the RF phase, and wall
   impacts come from simgeometry's ``shape.crossings(start, end)``, which tests the whole
@@ -78,7 +78,11 @@ import plotly.graph_objects as go
 from plasma_plots import save_figure
 from simgeometry import Rectangle
 
-from tree_d_3d import BoundaryIntegralElectrodes, conductors_from_shape
+from tree_d_3d import (
+    BoundaryIntegralElectrodes,
+    TabulatedField,
+    conductors_from_shape,
+)
 
 COLORS = {"C0": "#1f77b4", "C1": "#ff7f0e", "C2": "#2ca02c", "C3": "#d62728"}
 
@@ -134,33 +138,30 @@ class GapField:
     plate to the lower one; ``x`` runs along the plates, ``y`` across the gap.
     """
 
-    x: np.ndarray
-    y: np.ndarray
-    ex: np.ndarray  # (len(y), len(x)), V/m per volt
-    ey: np.ndarray
+    table: TabulatedField
     plates: tuple[Rectangle, Rectangle]
     num_panels: int
 
     def __call__(self, points: np.ndarray) -> np.ndarray:
         """Bilinear field ``(2, N)`` at ``(2, N)`` points (clamped to the table)."""
-        nx = self.x.size
-        fx = np.clip((points[0] - self.x[0]) / (self.x[1] - self.x[0]), 0, nx - 1.0)
-        fy = np.clip((points[1] - self.y[0]) / (self.y[1] - self.y[0]), 0, None)
-        i = np.minimum(fx.astype(int), nx - 2)
-        j = np.minimum(fy.astype(int), self.y.size - 2)
-        fx = fx - i
-        fy = np.minimum(fy - j, 1.0)
-        corner = j * nx + i
-        table = self._table
-        return (1 - fy) * (
-            (1 - fx) * table[:, corner] + fx * table[:, corner + 1]
-        ) + fy * ((1 - fx) * table[:, corner + nx] + fx * table[:, corner + nx + 1])
+        return self.table(points)[1]
 
     @property
-    def _table(self) -> np.ndarray:
-        if not hasattr(self, "_flat"):
-            self._flat = np.stack((self.ex.ravel(), self.ey.ravel()))
-        return self._flat
+    def x(self) -> np.ndarray:
+        return self.table.x
+
+    @property
+    def y(self) -> np.ndarray:
+        return self.table.y
+
+    @property
+    def ex(self) -> np.ndarray:
+        """``(len(y), len(x))``, V/m per volt."""
+        return self.table.field[0].T
+
+    @property
+    def ey(self) -> np.ndarray:
+        return self.table.field[1].T
 
 
 def solve_gap_field(panel: float, nx: int, ny: int) -> GapField:
@@ -187,18 +188,14 @@ def solve_gap_field(panel: float, nx: int, ny: int) -> GapField:
     )
     electrodes = BoundaryIntegralElectrodes(conductors, k_e=1.0)
     electrodes.solve()
-    x = np.linspace(-FIELD_HALF_WIDTH, FIELD_HALF_WIDTH, nx)
-    # within a panel length of a plate the midpoint rule is inaccurate (see
-    # tree_d_3d.electrodes): hold the field there at its value one panel off the plate
-    y = np.linspace(0.0, GAP, ny)
-    inner = np.clip(y, panel * GAP, GAP - panel * GAP)
-    xx, yy = np.meshgrid(x, inner)
-    field = electrodes.field(np.stack((xx.ravel(), yy.ravel())))
+    # stop a hair short of the plates: on a panel its own normal field is the average
+    # of the two sides of its surface charge; the table clamps beyond its edges
+    inset = 1e-4 * GAP
+    table = electrodes.tabulate(
+        (-FIELD_HALF_WIDTH, inset), (FIELD_HALF_WIDTH, GAP - inset), (nx, ny)
+    )
     return GapField(
-        x=x,
-        y=y,
-        ex=field[0].reshape(ny, nx),
-        ey=field[1].reshape(ny, nx),
+        table=table,
         plates=(lower, upper),
         num_panels=electrodes.num_panels,
     )

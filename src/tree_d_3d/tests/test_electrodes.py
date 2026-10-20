@@ -10,6 +10,7 @@ from tree_d_3d.electrodes import (
     BoundaryIntegralElectrodes,
     Conductor,
     conductors_from_shape,
+    segment_field,
 )
 
 
@@ -50,7 +51,13 @@ def test_grounded_circle_boundary_potential_is_small():
     boundary = np.stack((a * np.cos(theta), a * np.sin(theta)))
     phi = elec.potential(boundary)
     # not at the collocation points, so not machine zero, but small vs. the source scale
-    assert np.abs(phi).max() < 0.2
+    # (3.2): the near panels enter exactly, so it is far below the plain midpoint rule's
+    assert np.abs(phi).max() < 5e-3
+    midpoint_rule = BoundaryIntegralElectrodes(
+        [ring((0, 0), a, 200, 0.0)], k_e=1.0, near_field=0, far_points=1
+    )
+    midpoint_rule.solve(np.array([[d], [0.0]]), [q0])
+    assert np.abs(midpoint_rule.potential(boundary)).max() > 10 * np.abs(phi).max()
 
 
 def test_cylindrical_capacitor_matches_exact_profile_and_charge():
@@ -132,7 +139,8 @@ def test_graded_panels_are_short_near_the_aperture_tip():
 def test_polygon_conductor_interior_converges_to_equipotential_and_field_free():
     """An L-shaped conductor from a simgeometry Polygon screens its interior.
 
-    The flat-panel midpoint rule converges at first order in the panel length.
+    With exact near panels the error falls faster than second order in the panel
+    length (the plain midpoint rule converges at first order).
     """
     l_shape = Polygon(
         vertices=np.array([(0, 0), (2, 0), (2, 1), (1, 1), (1, 2), (0, 2)], dtype=float)
@@ -147,8 +155,8 @@ def test_polygon_conductor_interior_converges_to_equipotential_and_field_free():
         electrodes.solve()
         phi, field = electrodes.probe(inside)
         errors.append(max(np.abs(phi - 1.0).max(), np.abs(field).max()))
-    assert errors[1] < 5e-3
-    assert errors[0] / errors[1] == pytest.approx(2.0, rel=0.1)
+    assert errors[1] < 5e-5
+    assert errors[0] / errors[1] > 4.0
 
 
 def test_an_open_polyline_becomes_an_open_conductor():
@@ -159,3 +167,110 @@ def test_an_open_polyline_becomes_an_open_conductor():
     assert conductor.closed is False
     electrodes = BoundaryIntegralElectrodes([conductor], k_e=1.0)
     assert electrodes.num_panels == conductor.vertices.shape[1] - 1 == 10
+
+
+def _segment_by_quadrature(point, start, end, pieces=200, nodes=40):
+    """Composite Gauss--Legendre over ``pieces`` equal sub-segments (unit total charge)."""
+    x, w = np.polynomial.legendre.leggauss(nodes)
+    along = ((np.arange(pieces)[:, None] + 0.5 * (x + 1.0)) / pieces).ravel()
+    weight = np.tile(w, pieces) / (2.0 * pieces)
+    source = start[:, None] + along * (end - start)[:, None]
+    d = point[:, None] - source
+    r2 = np.sum(d * d, axis=0)
+    return np.sum(weight * -np.log(r2)), np.sum(weight * 2 * d / r2, axis=1)
+
+
+@pytest.mark.parametrize(
+    "point",
+    [
+        (0.7, 2.0),  # far
+        (0.31, -0.19),  # next to the start
+        (1.12, 0.41),  # next to the end
+        (1.5, 0.7),  # on the line, beyond the end
+        (0.75, 0.15),  # just off the middle
+        (-3.0, 1.0),
+    ],
+)
+def test_segment_field_matches_quadrature(point):
+    start, end = np.array([0.3, -0.2]), np.array([1.1, 0.4])
+    phi, field = segment_field(np.array(point)[:, None], start[:, None], end[:, None])
+    phi_q, field_q = _segment_by_quadrature(np.array(point), start, end)
+    assert phi[0] == pytest.approx(phi_q, abs=1e-10)
+    np.testing.assert_allclose(field[:, 0], field_q, atol=1e-8)
+
+
+def test_segment_field_on_the_segment_and_at_its_ends():
+    start, end = np.array([[0.0], [0.0]]), np.array([[2.0], [0.0]])
+    # at the midpoint: the analytic self term, no normal field
+    phi, field = segment_field(np.array([[1.0], [0.0]]), start, end)
+    assert phi[0] == pytest.approx(2.0 * (1.0 - np.log(1.0)))
+    np.testing.assert_allclose(field[:, 0], 0.0, atol=1e-14)
+    # at an end: finite potential  -(2/L) (L ln L - L)
+    phi, _ = segment_field(start, start, end)
+    assert phi[0] == pytest.approx(-2.0 * (np.log(2.0) - 1.0))
+
+
+def test_image_force_and_capacitor_charge_converge_at_high_order():
+    a, d, q0 = 1.5, 5.0, 1.0
+    force = _three_image_force(a, d, q0, 1.0)
+    q_exact = 1.0 / (2.0 * np.log(3.0))
+    force_errors, charge_errors = [], []
+    for n in (50, 100, 200):
+        elec = BoundaryIntegralElectrodes([ring((0, 0), a, n, 0.0)], k_e=1.0)
+        elec.solve(np.array([[d], [0.0]]), [q0])
+        force_errors.append(abs(q0 * elec.force_on_sources()[1][0, 0] / force - 1))
+        cap = BoundaryIntegralElectrodes(
+            [ring((0, 0), 1.0, n, 1.0), ring((0, 0), 3.0, n, 0.0)], k_e=1.0
+        )
+        cap.solve()
+        charge_errors.append(abs(cap.total_charge(0) / q_exact - 1))
+    assert force_errors[-1] < 5e-4 and charge_errors[-1] < 1e-5
+    # second order for the force, third for the induced charge
+    assert all(e0 / e1 > 3.5 for e0, e1 in zip(force_errors, force_errors[1:]))
+    assert all(e0 / e1 > 6.0 for e0, e1 in zip(charge_errors, charge_errors[1:]))
+
+
+def test_probes_on_the_boundary_are_finite_and_close_to_the_potential():
+    elec = BoundaryIntegralElectrodes([ring((0, 0), 0.5, 100, 1.0)], k_e=1.0)
+    elec.solve()
+    np.testing.assert_allclose(elec.potential(elec.midpoints), 1.0, atol=1e-12)
+    np.testing.assert_allclose(elec.potential(elec.starts), 1.0, atol=5e-3)
+    for midpoint_rule in ({"near_field": 0}, {"far_points": 1, "near_field": 0}):
+        rough = BoundaryIntegralElectrodes(
+            [ring((0, 0), 0.5, 100, 1.0)], k_e=1.0, **midpoint_rule
+        )
+        rough.solve()
+        assert np.isfinite(rough.potential(rough.midpoints)).all()
+
+
+def test_tabulated_field_interpolates_the_probe():
+    elec = BoundaryIntegralElectrodes(
+        [ring((0, 0), 0.5, 100, 1.0), ring((0, 0), 2.0, 100, 0.0)], k_e=1.0
+    )
+    elec.solve()
+    table = elec.tabulate((-1.2, -1.2), (1.2, 1.2), (241, 241))
+    assert table.potential.shape == (241, 241) and table.field.shape == (2, 241, 241)
+    rng = np.random.default_rng(1)
+    r = rng.uniform(0.7, 1.15, 200)
+    angle = rng.uniform(0, 2 * np.pi, 200)
+    points = np.stack((r * np.cos(angle), r * np.sin(angle)))
+    phi, field = table(points)
+    phi_p, field_p = elec.probe(points)
+    assert table.contains(points).all()
+    np.testing.assert_allclose(phi, phi_p, atol=1e-4)
+    np.testing.assert_allclose(field, field_p, atol=1e-3)
+    # outside the table: clamped to the edge, and reported by contains()
+    outside = np.array([[5.0], [0.0]])
+    assert not table.contains(outside)[0]
+    edge = table(np.array([[1.2], [0.0]]))
+    np.testing.assert_allclose(table(outside)[1], edge[1])
+    with pytest.raises(ValueError, match="2 grid lines"):
+        elec.tabulate((0, 0), (1, 1), (1, 5))
+
+
+def test_invalid_near_field_settings_are_rejected():
+    conductor = ring((0, 0), 0.5, 20, 1.0)
+    with pytest.raises(ValueError, match="near_field"):
+        BoundaryIntegralElectrodes([conductor], near_field=-1)
+    with pytest.raises(ValueError, match="far_points"):
+        BoundaryIntegralElectrodes([conductor], far_points=0)
