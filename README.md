@@ -35,9 +35,11 @@ planned.
   conformal mapping and the FMM, including the image force of the
   plates.
 - `BoundaryIntegralElectrodes`: conductors at prescribed potentials, by
-  the boundary-integral (panel) method; `conductors_from_shape` panels
-  any 2D simgeometry shape (`Circle`, `Polygon`, `Aperture2D`, …), with
-  optionally graded panel lengths.
+  the boundary-integral (panel) method, with the exact field of the
+  panels near a target (second- to third-order convergence);
+  `conductors_from_shape` panels any 2D simgeometry shape (`Circle`,
+  `Polygon`, `Aperture2D`, …), with optionally graded panel lengths, and
+  `tabulate` samples the solved field on a grid for fast interpolation.
 - `ReferenceQuadtree`: a readable object tree computing the same as the
   flat tree.
 - `tree_d_3d.gravity`: the classic gravitational Barnes-Hut N-body code.
@@ -159,8 +161,9 @@ sheet beam against its exact parabolic envelope.
 `BoundaryIntegralElectrodes`, conductors at prescribed potentials by the
 single-layer boundary-integral (panel) method, built from simgeometry
 `Circle` and `Polygon` shapes, validated against a closed-form
-three-image solution for a grounded circle and the exact profile of a
-cylindrical capacitor. `examples/einzel_lens.py` is a practical use of
+three-image solution for a grounded circle (the image force converges at
+second order) and the exact profile and charge of a cylindrical
+capacitor (third order). `examples/einzel_lens.py` is a practical use of
 the electrode solver: a 2D slit einzel lens built from simgeometry
 `Aperture2D` plates focusing a beam of test charges. Like a round einzel
 lens it focuses for both polarities, the decelerating one much more
@@ -181,19 +184,22 @@ charge-exchange current growing linearly with neutral pressure until the
 beam attenuates. `examples/multipactor.py` builds the two-surface
 multipactor susceptibility chart from simulation: plates from
 simgeometry solved by the panel method, wall impacts from `crossings()`
-and Vaughan’s secondary-emission yield carried as electron weights.
-Every simulated growth point lies inside the zone of the
-constant-emission-velocity resonance theory drawn over the chart.
-`examples/reflectron_tof.py` is a gridless reflectron time-of-flight
-mass spectrometer from simgeometry slits: its traced energy focusing
-matches Mamyrin’s condition `qEL = 4 U0` to 0.5%, and it resolves masses
-100–102 u that a linear instrument merges. `examples/pierce_gun.py` is a
-planar Pierce electron gun from simgeometry polylines, solved by a gun
-iteration without a mesh: it holds the Child-Langmuir potential and
-current and keeps the beam parallel where a flat diode lets it spread.
-`examples/drift_tube_mobility.py` is an ion-mobility drift tube with
-plasmacoll collisions, reproducing the polarization-limit mobility,
-Einstein’s diffusion and the diffusion-limited resolving power.
+and Vaughan’s secondary-emission yield carried as electron weights. Five
+of the six simulated growth points of the quick chart lie inside the
+zone of the constant-emission-velocity resonance theory drawn over it;
+the sixth, the weakest, sits just below the zone’s lower edge at the
+highest `f d`. `examples/reflectron_tof.py` is a gridless reflectron
+time-of-flight mass spectrometer from simgeometry slits: its traced
+energy focusing matches Mamyrin’s condition `qEL = 4 U0` to 0.3%, and it
+resolves masses 100–102 u that a linear instrument merges.
+`examples/pierce_gun.py` is a planar Pierce electron gun from
+simgeometry polylines, solved by a gun iteration without a mesh: it
+holds the Child-Langmuir potential, reaches its space-charge limit at
+about 1.07 `J_CL` whatever the panel size, and keeps the beam parallel
+where a flat diode lets it spread. `examples/drift_tube_mobility.py` is
+an ion-mobility drift tube with plasmacoll collisions, reproducing the
+polarization-limit mobility, Einstein’s diffusion and the
+diffusion-limited resolving power.
 
 ## Development
 

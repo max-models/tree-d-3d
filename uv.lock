@@ -4057,7 +4057,7 @@ wheels = [
 [[package]]
 name = "simgeometry"
 version = "0.1.0"
-source = { git = "https://github.com/max-models/simgeometry?rev=devel#eb9afa8ce982d72a9afdf10b671615b8b9b6a660" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cunumpy" },
     { name = "maybempi" },
@@ -4065,6 +4065,10 @@ dependencies = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
     { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/bd/e6/d62d336630c3eb0720faf7b731169a4da1386ad7eb61036187546f1ae861/simgeometry-0.1.0.tar.gz", hash = "sha256:c964839c2d98624c9ff0d05254c7b6f5df76ba13e5c7e04755dfac968614d4e6", size = 71319, upload-time = "2026-10-20T10:48:48.671Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0a/8b/bb41043d114b5d01f9b204cd76da57d4961606c0d871d1e7c6073f91df2d/simgeometry-0.1.0-py3-none-any.whl", hash = "sha256:979fe6d480973788c28785b3ad2c8609a0980d9f7d5cc0a0841faf01cd4515aa", size = 98691, upload-time = "2026-10-20T10:48:47.364Z" },
 ]
 
 [[package]]
@@ -4427,19 +4431,19 @@ requires-dist = [
     { name = "plasma-plots", extras = ["plotly"], marker = "extra == 'examples'" },
     { name = "plasmacoll", marker = "extra == 'examples'", git = "https://github.com/max-models/plasmacoll?rev=devel" },
     { name = "pre-commit", marker = "extra == 'dev'" },
-    { name = "pyccel", specifier = ">2" },
+    { name = "pyccel", specifier = ">2.0" },
     { name = "pyproject-fmt", marker = "extra == 'dev'" },
     { name = "pyright", marker = "extra == 'dev'" },
     { name = "pytest", marker = "extra == 'test'" },
     { name = "pytest-cov", marker = "extra == 'test'" },
     { name = "ruff", marker = "extra == 'dev'" },
     { name = "scipy" },
-    { name = "simgeometry", git = "https://github.com/max-models/simgeometry?rev=devel" },
-    { name = "tree-d-3d", extras = ["docs", "examples", "test"], marker = "extra == 'dev'" },
+    { name = "simgeometry", specifier = ">=0.1.0" },
     { name = "tree-d-3d", extras = ["examples"], marker = "extra == 'docs'" },
     { name = "tree-d-3d", extras = ["examples"], marker = "extra == 'test'" },
+    { name = "tree-d-3d", extras = ["test", "docs", "examples"], marker = "extra == 'dev'" },
 ]
-provides-extras = ["dev", "docs", "examples", "gpu", "metal", "test"]
+provides-extras = ["dev", "examples", "docs", "gpu", "metal", "test"]
 
 [[package]]
 name = "typing-extensions"

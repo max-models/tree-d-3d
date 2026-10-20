@@ -7,6 +7,16 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `BoundaryIntegralElectrodes` treats panels within `near_field` (4) of their own lengths of a
+  target with the exact potential and field of a uniformly charged segment
+  (`segment_field`), and sums farther panels fast as `far_points` (2) Gauss-Legendre point
+  charges each. The boundary potential between collocation points drops from about a tenth to
+  a few thousandths of the source scale, and the method converges at second to third order
+  instead of first; `near_field=0, far_points=1` is the old midpoint rule.
+- `BoundaryIntegralElectrodes.tabulate()` and `TabulatedField`: the solved field on a grid,
+  interpolated bilinearly; `panel_field()`: the panels' field without the free charges. The
+  multipactor, reflectron and Pierce-gun examples use them.
+
 - Examples beyond the tree code's home ground, each checked against a closed form or an analytic
   rate: charge-exchange ions and grid erosion in an ion-thruster grid set
   (`cex_grid_erosion.py`), a multipactor susceptibility chart (`multipactor.py`), a reflectron
@@ -22,6 +32,8 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   simgeometry shapes (`Aperture2D`, `Circle`, `Polygon`).
 
 ### Changed
+
+- simgeometry comes from PyPI (`simgeometry>=0.1.0`) instead of git.
 
 - `BoundaryIntegralElectrodes` LU-factorises its panel matrix once; each `solve()` reuses it.
 - The test extra installs the examples extra, so CI runs every example test.

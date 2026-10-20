@@ -29,7 +29,9 @@ limited when it vanishes. Code units ``eps0 = m = |q| = d = V = 1``, so ``J_CL =
 2. ``axial_potential``: the potential along the beam axis against the Child-Langmuir
    ``V (x / d)^(4/3)``.
 3. ``cathode_field``: the cathode field at the beam centre against the current density;
-   it vanishes near ``J_CL``, the space-charge limit.
+   it vanishes near ``J_CL``, the space-charge limit: at about ``1.07 J_CL`` with the
+   ``--quick`` rays, a value that stays put when the panels are refined fourfold, so the
+   excess is not an electrode error.
 4. ``beam_edge``: the outermost ray with the Pierce electrodes and in a flat diode of the
    same gap (wide cathode and gridded anode planes, emitting only over the beam width):
    with them the edge stays within a few percent of parallel (drawn slightly in by the
@@ -63,7 +65,6 @@ from tree_d_3d import (
     Quad,
     conductors_from_shape,
 )
-from tree_d_3d.flat_tree import direct_field
 
 COLORS = {"C0": "#1f77b4", "C1": "#ff7f0e", "C2": "#2ca02c", "C3": "#d62728"}
 K_E = 1.0 / (4.0 * np.pi)  # eps0 = 1
@@ -140,10 +141,7 @@ class Gun:
 
     def probe(self, points: np.ndarray, tree) -> tuple[np.ndarray, np.ndarray]:
         """Potential and field: electrodes (panels) plus the beam (tree code)."""
-        phi_p, e_p = direct_field(
-            points, self.bem.midpoints, self.bem.charge, kernel="log"
-        )
-        phi, e = K_E * phi_p, K_E * e_p
+        phi, e = self.bem.panel_field(points)
         if tree is not None:
             phi_b, e_b = tree.evaluate(points, theta=0.5, softening=self.softening)
             phi, e = phi + K_E * np.asarray(phi_b), e + K_E * np.asarray(e_b)

@@ -52,7 +52,6 @@ from pathlib import Path
 import numpy as np
 import plotly.graph_objects as go
 from plasma_plots import save_figure
-from scipy.interpolate import RegularGridInterpolator
 from simgeometry import Aperture2D, Polyline
 
 from tree_d_3d import BoundaryIntegralElectrodes, Conductor, conductors_from_shape
@@ -114,19 +113,14 @@ class FieldMap:
     """The electrodes' field tabulated on a grid around the ion paths (bilinear)."""
 
     def __init__(self, electrodes: BoundaryIntegralElectrodes, h: float) -> None:
-        self.x = np.arange(-0.5, REFLECTRON_X + DEPTH + 0.2, h)
-        self.y = np.arange(-1.2, 1.2 + h / 2, h)
-        xx, yy = np.meshgrid(self.x, self.y, indexing="ij")
-        phi, e = electrodes.probe(np.stack((xx.ravel(), yy.ravel())))
-        shape = xx.shape
-        self.phi = phi.reshape(shape)
-        kw = {"bounds_error": False, "fill_value": 0.0}
-        self._ex = RegularGridInterpolator((self.x, self.y), e[0].reshape(shape), **kw)
-        self._ey = RegularGridInterpolator((self.x, self.y), e[1].reshape(shape), **kw)
+        x = np.arange(-0.5, REFLECTRON_X + DEPTH + 0.2, h)
+        y = np.arange(-1.2, 1.2 + h / 2, h)
+        self.table = electrodes.tabulate((x[0], y[0]), (x[-1], y[-1]), (x.size, y.size))
+        self.x, self.y = self.table.x, self.table.y
+        self.phi = self.table.potential
 
     def __call__(self, pos: np.ndarray) -> np.ndarray:
-        pts = pos.T
-        return np.stack((self._ex(pts), self._ey(pts)))
+        return self.table(pos)[1]
 
 
 def flight_times(

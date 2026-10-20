@@ -24,7 +24,9 @@ from tree_d_3d.constants import K_E
 from tree_d_3d.electrodes import (
     BoundaryIntegralElectrodes,
     Conductor,
+    TabulatedField,
     conductors_from_shape,
+    segment_field,
 )
 from tree_d_3d.flat_tree import FlatNode, FlatQuadtree, direct_field
 from tree_d_3d.kernels import kernels_compiled
@@ -48,7 +50,9 @@ __all__ = [
     "Quad",
     "ReferenceNode",
     "ReferenceQuadtree",
+    "TabulatedField",
     "conductors_from_shape",
     "direct_field",
     "kernels_compiled",
+    "segment_field",
 ]

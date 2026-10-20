@@ -7,7 +7,9 @@ discretises each conductor's boundary into straight panels (here from
 :mod:`simgeometry` shapes, by :func:`tree_d_3d.conductors_from_shape`), collocates the Dirichlet
 condition at their midpoints and solves the resulting dense linear system for the
 induced line-charge density -- the standard first-kind single-layer boundary-element
-method, with a closed-form self-term for each panel. This example checks it against two
+method, with a closed-form self-term for each panel and the exact field of a uniformly
+charged segment for the panels near a target (farther ones are summed fast as Gauss
+points). This example checks it against two
 cases with an exact answer in the code's own units, both line-charge electrostatics with
 the log kernel ``phi = -2 k_e q ln r``:
 
@@ -24,11 +26,13 @@ logarithmic potential profile between them and a known induced charge from Gauss
    charge, sampled between the panels (not at the collocation points), against the
    target of zero.
 2. ``image_force``: the force the circle exerts back on the external charge against the
-   three-image closed form, over the panel count -- the convergence of the method.
+   three-image closed form, over the panel count -- the convergence of the method, at
+   second order in the panel length, since panels near a target enter with their exact
+   field (the plain midpoint rule converges at first order).
 3. ``capacitor_profile``: the potential across the gap of a two-conductor cylindrical
    capacitor against the exact logarithmic profile.
 4. ``capacitor_charge``: the induced charge on the inner conductor against the exact
-   Gauss's-law value, over the panel count.
+   Gauss's-law value, over the panel count: third order.
 5. ``corner_potential``: a filled contour of the potential around a grounded, non-convex
    (L-shaped) conductor with a nearby charge -- panels need no special treatment at a
    corner, unlike methods that assume a smooth boundary; the boundary potential error is
@@ -161,14 +165,14 @@ def main(argv: list[str] | None = None) -> Path:
             name="BEM force vs the three-image closed form",
         )
     )
-    ref = errors[0] * (np.array(panels_scan) / panels_scan[0]) ** -1.0
+    ref = errors[0] * (np.array(panels_scan) / panels_scan[0]) ** -2.0
     fig.add_trace(
         go.Scatter(
             x=panels_scan,
             y=ref,
             mode="lines",
             line={"color": "black", "dash": "dash"},
-            name="1 / n",
+            name="1 / n^2",
         )
     )
     fig.update_xaxes(type="log", title_text="panels")
@@ -233,14 +237,14 @@ def main(argv: list[str] | None = None) -> Path:
             name="inner conductor's induced charge",
         )
     )
-    ref = charge_errors[0] * (np.array(panels_scan) / panels_scan[0]) ** -1.0
+    ref = charge_errors[0] * (np.array(panels_scan) / panels_scan[0]) ** -3.0
     fig.add_trace(
         go.Scatter(
             x=panels_scan,
             y=ref,
             mode="lines",
             line={"color": "black", "dash": "dash"},
-            name="1 / n",
+            name="1 / n^3",
         )
     )
     fig.update_xaxes(type="log", title_text="panels per conductor")
