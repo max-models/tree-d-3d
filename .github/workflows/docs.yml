@@ -51,7 +51,7 @@ jobs:
         run: uv run python docs/tools/examples.py run --shard ${{ matrix.shard }}/4 --python "$(pwd)/.venv/bin/python"
 
       - name: Keep the results for the docs job
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: examples-${{ matrix.shard }}
           path: docs/.cache/examples
