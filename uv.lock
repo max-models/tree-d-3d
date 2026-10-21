@@ -911,8 +911,8 @@ wheels = [
 
 [[package]]
 name = "cunumpy"
-version = "0.6.3"
-source = { git = "https://github.com/max-models/cunumpy?rev=devel#40825b1e7248da449f6b56285072df62e602e6eb" }
+version = "0.7.1"
+source = { git = "https://github.com/max-models/cunumpy?branch=devel#870f51868b23d4ab9945ee48d7156a744647f95a" }
 dependencies = [
     { name = "array-api-compat" },
     { name = "maybempi" },
@@ -2311,11 +2311,7 @@ wheels = [
 [[package]]
 name = "maybempi"
 version = "0.1.2"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/c4/0d/ed782142085f56da45eb4511dd3fb2a7b1ed167fe5495dd429c61272774e/maybempi-0.1.2.tar.gz", hash = "sha256:0b0fadd2897281df50a2cf3f08ddf080d1ca00c9d2e4e5aee2af7cf5222ba04d", size = 42851, upload-time = "2026-10-07T05:38:48.594Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/88/d3/b161669937ee87dba4c61a6ac2be70bd1399269c76c66524e3f8be071839/maybempi-0.1.2-py3-none-any.whl", hash = "sha256:1fc9a2eb7e4f55a6b91da32e8e77bade35df157e6ce5de3b228cdf799e99970b", size = 47478, upload-time = "2026-10-07T05:38:47.046Z" },
-]
+source = { git = "https://github.com/max-models/maybempi?branch=devel#0146f000137c58b84381c176e03ffd2b3e191ce7" }
 
 [[package]]
 name = "meson"
@@ -2387,17 +2383,14 @@ wheels = [
 
 [[package]]
 name = "mpiarray"
-version = "0.1.0"
-source = { registry = "https://pypi.org/simple" }
+version = "0.2.1"
+source = { git = "https://github.com/max-models/mpiarray?branch=devel#cb5c8b4ad304faf023d1f28c5787d028867c1673" }
 dependencies = [
     { name = "cunumpy" },
+    { name = "maybempi" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
     { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/a2/7b/69a0f757f91d022c36df8a170b90d501f3fe9bfe88f65b30d69a51c9f81a/mpiarray-0.1.0.tar.gz", hash = "sha256:894491cf096a303cf3314821a076c7da7fb0f7ba98aa332eb8e18a75507e80b1", size = 60918, upload-time = "2026-10-06T16:06:45.033Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/3d/47/a3c6152a4ec4f27be7e5fd39d4ec3602968368e319cf9897fd1e4bbc49af/mpiarray-0.1.0-py3-none-any.whl", hash = "sha256:3ed5623d8b78f8aba29fa4f21e9c0847e656c554e372a2125ac1b5df35e2e70f", size = 67554, upload-time = "2026-10-06T16:06:43.72Z" },
 ]
 
 [[package]]
@@ -3049,8 +3042,8 @@ wheels = [
 
 [[package]]
 name = "plasma-plots"
-version = "0.2.1"
-source = { registry = "https://pypi.org/simple" }
+version = "0.2.3"
+source = { git = "https://github.com/max-models/plasma-plots?branch=devel#bcd999e8e3fa4364dbe6683891983953d845edd5" }
 dependencies = [
     { name = "ipywidgets" },
     { name = "matplotlib", version = "3.10.9", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
@@ -3061,10 +3054,6 @@ dependencies = [
     { name = "xarray", version = "2025.6.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "xarray", version = "2026.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/26/c3/376b3ce0c9850f030ec3451ad004d8fe9aeca6c3e13742ab787c440f2aad/plasma_plots-0.2.1.tar.gz", hash = "sha256:d4b90a9abb799db458ed38e851e08bb2b14ef17886d342bfb4d586f8ed4854ec", size = 417240, upload-time = "2026-10-11T15:26:51.456Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/4e/29/30c50e334875b4c5cc5d12f1467e3310e840a454683639fceec2293e4723/plasma_plots-0.2.1-py3-none-any.whl", hash = "sha256:fa27166a8f2d1ccca6ba7ec1856cadf16294b48014a197b7301407c2504ef088", size = 326945, upload-time = "2026-10-11T15:26:50.065Z" },
-]
 
 [package.optional-dependencies]
 plotly = [
@@ -3074,8 +3063,8 @@ plotly = [
 
 [[package]]
 name = "plasmacoll"
-version = "0.1.0"
-source = { git = "https://github.com/max-models/plasmacoll?rev=devel#a5997f068c019e22a94a62296077688246d8a7c8" }
+version = "0.2.0"
+source = { git = "https://github.com/max-models/plasmacoll?branch=devel#efc3068209e7b897defd88b92eb3564fbe6debb4" }
 dependencies = [
     { name = "cunumpy" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
@@ -4107,8 +4096,8 @@ wheels = [
 
 [[package]]
 name = "scope-profiler"
-version = "0.7.4"
-source = { git = "https://github.com/max-models/scope-profiler?rev=devel#19f59c4ed98cf61ba6bd7c9244aee133983924b3" }
+version = "0.7.5"
+source = { git = "https://github.com/max-models/scope-profiler?branch=devel#2abb4ca4fe74166be554d30c3b78af8041f930ae" }
 dependencies = [
     { name = "h5py" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
@@ -4129,8 +4118,8 @@ wheels = [
 
 [[package]]
 name = "simgeometry"
-version = "0.1.0"
-source = { registry = "https://pypi.org/simple" }
+version = "0.1.1"
+source = { git = "https://github.com/max-models/simgeometry?branch=devel#657cb48a0aa9974349fdc3ade7972a60a8a7d915" }
 dependencies = [
     { name = "cunumpy" },
     { name = "maybempi" },
@@ -4138,10 +4127,6 @@ dependencies = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
     { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/bd/e6/d62d336630c3eb0720faf7b731169a4da1386ad7eb61036187546f1ae861/simgeometry-0.1.0.tar.gz", hash = "sha256:c964839c2d98624c9ff0d05254c7b6f5df76ba13e5c7e04755dfac968614d4e6", size = 71319, upload-time = "2026-10-20T10:48:48.671Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/0a/8b/bb41043d114b5d01f9b204cd76da57d4961606c0d871d1e7c6073f91df2d/simgeometry-0.1.0-py3-none-any.whl", hash = "sha256:979fe6d480973788c28785b3ad2c8609a0980d9f7d5cc0a0841faf01cd4515aa", size = 98691, upload-time = "2026-10-20T10:48:47.364Z" },
 ]
 
 [[package]]
@@ -4502,7 +4487,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "cunumpy", git = "https://github.com/max-models/cunumpy?rev=devel" },
+    { name = "cunumpy", git = "https://github.com/max-models/cunumpy?branch=devel" },
     { name = "cupy-cuda12x", marker = "extra == 'gpu'" },
     { name = "griffe", marker = "extra == 'docs'" },
     { name = "ipykernel", marker = "extra == 'docs'" },
@@ -4511,8 +4496,8 @@ requires-dist = [
     { name = "nbclient", marker = "extra == 'docs'", specifier = ">=0.10" },
     { name = "nbformat", marker = "extra == 'docs'", specifier = ">=5.10" },
     { name = "numpy" },
-    { name = "plasma-plots", extras = ["plotly"], marker = "extra == 'examples'" },
-    { name = "plasmacoll", marker = "extra == 'examples'", git = "https://github.com/max-models/plasmacoll?rev=devel" },
+    { name = "plasma-plots", extras = ["plotly"], marker = "extra == 'examples'", git = "https://github.com/max-models/plasma-plots?branch=devel" },
+    { name = "plasmacoll", marker = "extra == 'examples'", git = "https://github.com/max-models/plasmacoll?branch=devel" },
     { name = "pre-commit", marker = "extra == 'dev'" },
     { name = "pyccel", specifier = ">2.0" },
     { name = "pyproject-fmt", marker = "extra == 'dev'" },
@@ -4521,8 +4506,8 @@ requires-dist = [
     { name = "pytest-cov", marker = "extra == 'test'" },
     { name = "ruff", marker = "extra == 'dev'" },
     { name = "scipy" },
-    { name = "scope-profiler", git = "https://github.com/max-models/scope-profiler?rev=devel" },
-    { name = "simgeometry", specifier = ">=0.1.0" },
+    { name = "scope-profiler", git = "https://github.com/max-models/scope-profiler?branch=devel" },
+    { name = "simgeometry", git = "https://github.com/max-models/simgeometry?branch=devel" },
     { name = "tree-d-3d", extras = ["examples"], marker = "extra == 'docs'" },
     { name = "tree-d-3d", extras = ["examples"], marker = "extra == 'test'" },
     { name = "tree-d-3d", extras = ["test", "docs", "examples"], marker = "extra == 'dev'" },

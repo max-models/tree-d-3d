@@ -28,6 +28,12 @@ concurrency:
   group: docs-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # A PR to main or a push to main (the release) uses PyPI versions only; devel uses the
+  # devel branches from [tool.uv.sources]. The shared starlight-theme workflow does not inherit
+  # this, so its build always uses the sources.
+  UV_NO_SOURCES: ${{ (github.base_ref || github.ref_name) == 'main' }}
+
 jobs:
   examples:
     name: Examples, shard ${{ matrix.shard }} of 4
