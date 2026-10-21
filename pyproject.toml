@@ -22,7 +22,7 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Physics",
 ]
 dependencies = [
-  "cunumpy @ git+https://github.com/max-models/cunumpy@devel",
+  "cunumpy>=0.7.1",
   "numpy",
   "pyccel>2.0",
   "scipy",
@@ -39,7 +39,7 @@ optional-dependencies.dev = [
 ]
 optional-dependencies.examples = [
   "plasma-plots[plotly]",
-  "plasmacoll @ git+https://github.com/max-models/plasmacoll@devel",
+  "plasmacoll>=0.2.0",
 ]
 optional-dependencies.docs = [
   "griffe",
@@ -99,3 +99,11 @@ omit = [ "*/tests/*" ]
 
 [tool.coverage.report]
 show_missing = true
+
+# PRs to devel test against the devel branches of the max-models packages (pinned in
+# uv.lock); PRs to main and the release use PyPI only (CI sets UV_NO_SOURCES).
+[tool.uv.sources]
+cunumpy = { git = "https://github.com/max-models/cunumpy", branch = "devel" }
+plasma-plots = { git = "https://github.com/max-models/plasma-plots", branch = "devel" }
+plasmacoll = { git = "https://github.com/max-models/plasmacoll", branch = "devel" }
+simgeometry = { git = "https://github.com/max-models/simgeometry", branch = "devel" }
