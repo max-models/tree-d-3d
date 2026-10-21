@@ -30,7 +30,9 @@ from __future__ import annotations
 
 import cunumpy as xp
 import numpy as np
+import scope_profiler as sp
 
+from tree_d_3d._profiling import _PROFILE_TAGS
 from tree_d_3d._utils import _check, _device, _finite, _host, _points
 from tree_d_3d.constants import K_E
 from tree_d_3d.kernels import _kernels
@@ -43,6 +45,7 @@ MAX_ORDER = 64
 _KERNELS = ("coulomb", "log")
 
 
+@sp.profile("tree_d_3d.flat_tree.direct_field", tags=_PROFILE_TAGS)
 def direct_field(
     targets,
     pos,
@@ -333,18 +336,40 @@ class FlatQuadtree:
         if not n:
             self._empty(root_quad)
             return
-        count = self._build(root_quad)
-        self.node_count = int(count)
-        for name in _NODE_ARRAYS:
-            setattr(self, name, getattr(self, name)[:count].copy())
-        self.node_q = self._xp.empty(count)
-        self.node_qabs = self._xp.empty(count)
-        self.node_p = self._xp.empty((count, 2))
-        self.node_s = self._xp.empty((count, 3))
-        if kernel == "log":
-            self.moment_re = self._xp.empty((count, self.order + 1))
-            self.moment_im = self._xp.empty((count, self.order + 1))
-            self._kernels.log_quadtree_moments(
+        with sp.region("tree_d_3d.flat_tree.build", tags=_PROFILE_TAGS):
+            count = self._build(root_quad)
+            self.node_count = int(count)
+            for name in _NODE_ARRAYS:
+                setattr(self, name, getattr(self, name)[:count].copy())
+        with sp.region("tree_d_3d.flat_tree.moments", tags=_PROFILE_TAGS):
+            self.node_q = self._xp.empty(count)
+            self.node_qabs = self._xp.empty(count)
+            self.node_p = self._xp.empty((count, 2))
+            self.node_s = self._xp.empty((count, 3))
+            if kernel == "log":
+                self.moment_re = self._xp.empty((count, self.order + 1))
+                self.moment_im = self._xp.empty((count, self.order + 1))
+                self._kernels.log_quadtree_moments(
+                    self.pos,
+                    self.charge,
+                    self.perm,
+                    count,
+                    self.node_center,
+                    self.node_start,
+                    self.node_end,
+                    self.node_qabs,
+                    self.moment_re,
+                    self.moment_im,
+                    n_threads=count,
+                )
+                self.node_q[:] = self.moment_re[:, 0]
+                self.node_p[:, 0] = self.moment_re[:, 1]
+                self.node_p[:, 1] = self.moment_im[:, 1]
+                self._stack = self._xp.empty(
+                    3 * int(self.node_depth.max()) + 8, dtype=np.int64
+                )
+                return
+            self._kernels.quadtree_moments(
                 self.pos,
                 self.charge,
                 self.perm,
@@ -352,33 +377,15 @@ class FlatQuadtree:
                 self.node_center,
                 self.node_start,
                 self.node_end,
+                self.node_q,
                 self.node_qabs,
-                self.moment_re,
-                self.moment_im,
+                self.node_p,
+                self.node_s,
                 n_threads=count,
             )
-            self.node_q[:] = self.moment_re[:, 0]
-            self.node_p[:, 0] = self.moment_re[:, 1]
-            self.node_p[:, 1] = self.moment_im[:, 1]
             self._stack = self._xp.empty(
                 3 * int(self.node_depth.max()) + 8, dtype=np.int64
             )
-            return
-        self._kernels.quadtree_moments(
-            self.pos,
-            self.charge,
-            self.perm,
-            count,
-            self.node_center,
-            self.node_start,
-            self.node_end,
-            self.node_q,
-            self.node_qabs,
-            self.node_p,
-            self.node_s,
-            n_threads=count,
-        )
-        self._stack = self._xp.empty(3 * int(self.node_depth.max()) + 8, dtype=np.int64)
 
     @property
     def root(self) -> FlatNode:
@@ -389,6 +396,7 @@ class FlatQuadtree:
         occupied = _host(self._xp.flatnonzero(self.node_end > self.node_start))
         return [FlatNode(self, int(i)) for i in occupied]
 
+    @sp.profile("tree_d_3d.flat_tree.evaluate", tags=_PROFILE_TAGS)
     def evaluate(self, targets, *, exclude=None, theta=0.5, softening=0.0):
         """Potential ``(M,)`` and field ``(2, M)`` at ``targets`` ``(2, M)``, without ``k_e``.
 
@@ -494,6 +502,7 @@ class FlatQuadtree:
                 return m2l, p2p, sizes
             capacity = np.maximum(2 * capacity, sizes[:3])
 
+    @sp.profile("tree_d_3d.flat_tree.fmm", tags=_PROFILE_TAGS)
     def fmm(
         self, *, theta: float = 0.5, softening: float = 0.0, potential: bool = True
     ):

@@ -34,9 +34,11 @@ from dataclasses import dataclass
 from typing import Protocol
 
 import numpy as np
+import scope_profiler as sp
 from scipy.linalg import lu_factor, lu_solve
 from scipy.spatial import KDTree
 
+from tree_d_3d._profiling import _PROFILE_TAGS
 from tree_d_3d.constants import K_E
 from tree_d_3d.flat_tree import direct_field
 
@@ -264,8 +266,9 @@ class BoundaryIntegralElectrodes:
         ).reshape(2, -1)
         self._node_weights = np.tile(self._weights, self.num_panels)
         self._node_tree = KDTree(self._nodes.T)
-        self._matrix = self._build_matrix()
-        self._lu = lu_factor(self._matrix)
+        with sp.region("tree_d_3d.electrodes.factorize", tags=_PROFILE_TAGS):
+            self._matrix = self._build_matrix()
+            self._lu = lu_factor(self._matrix)
         #: solved panel charges, set by :meth:`solve`
         self.charge: np.ndarray | None = None
         self._source_positions = np.zeros((2, 0))
@@ -288,6 +291,7 @@ class BoundaryIntegralElectrodes:
         keep = distance < self.near_field * self.lengths[panel]
         return target[keep], panel[keep]
 
+    @sp.profile("tree_d_3d.electrodes.panel_field", tags=_PROFILE_TAGS)
     def _panel_field(self, points: np.ndarray, charge: np.ndarray):
         """Raw potential and field at ``points`` from panels carrying ``charge``.
 
@@ -350,6 +354,7 @@ class BoundaryIntegralElectrodes:
         np.fill_diagonal(matrix, self_term)
         return matrix
 
+    @sp.profile("tree_d_3d.electrodes.solve", tags=_PROFILE_TAGS)
     def solve(self, source_positions=None, source_charges=None) -> np.ndarray:
         """Solve for the panel charges that make every conductor an equipotential.
 
