@@ -17,8 +17,15 @@ The particles move in a plane for now; full 3D, on an octree, is planned.
 * :mod:`tree_d_3d.gravity`: the classic gravitational Barnes-Hut N-body code.
 
 The compiled kernels are in :mod:`tree_d_3d.kernels`.
+
+The solvers carry scope-profiler regions, tagged ``"tree_d_3d"``. The tag is opt-in, so
+they record nothing unless the application enables it, for example with
+``scope_profiler.setup(enable_tags=["tree_d_3d"])``.
 """
 
+import scope_profiler as sp
+
+from tree_d_3d._profiling import PROFILE_TAG
 from tree_d_3d.bodies import ChargedBody
 from tree_d_3d.constants import K_E
 from tree_d_3d.electrodes import (
@@ -35,10 +42,13 @@ from tree_d_3d.reference import ReferenceNode, ReferenceQuadtree
 from tree_d_3d.simulation import AbsorbedParticles, ElectrostaticSimulation
 from tree_d_3d.strip import GroundedStripField
 
+sp.register_opt_in_tag(PROFILE_TAG)
+
 __version__ = "0.1.0"  # x-release-please-version
 
 __all__ = [
     "K_E",
+    "PROFILE_TAG",
     "AbsorbedParticles",
     "BoundaryIntegralElectrodes",
     "ChargedBody",

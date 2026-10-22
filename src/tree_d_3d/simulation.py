@@ -7,7 +7,9 @@ from typing import TYPE_CHECKING
 
 import cunumpy as xp
 import numpy as np
+import scope_profiler as sp
 
+from tree_d_3d._profiling import _PROFILE_TAGS
 from tree_d_3d._utils import _check, _device, _finite, _host
 from tree_d_3d.bodies import ChargedBody
 from tree_d_3d.constants import K_E
@@ -443,6 +445,7 @@ class ElectrostaticSimulation:
         self._potential[targets] = self.k_e * phi
         self._electric[:, targets] = self.k_e * self.charges[None, targets] * field
 
+    @sp.profile("tree_d_3d.simulation.compute_fields", tags=_PROFILE_TAGS)
     def compute_fields(self, include_fixed: bool = True) -> FlatQuadtree | None:
         """Electric force and potential on every particle, reusing a cache.
 
@@ -498,6 +501,7 @@ class ElectrostaticSimulation:
         )
         return self._tree
 
+    @sp.profile("tree_d_3d.simulation.step", tags=_PROFILE_TAGS)
     def step(self, dt: float | None = None) -> FlatQuadtree | None:
         """Electric half-kick, exact cyclotron drift, electric half-kick.
 

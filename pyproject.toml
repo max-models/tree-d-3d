@@ -26,6 +26,7 @@ dependencies = [
   "numpy",
   "pyccel>2.0",
   "scipy",
+  "scope-profiler>=0.7.5",
   "simgeometry>=0.1.0",
 ]
 
@@ -106,4 +107,5 @@ show_missing = true
 cunumpy = { git = "https://github.com/max-models/cunumpy", branch = "devel" }
 plasma-plots = { git = "https://github.com/max-models/plasma-plots", branch = "devel" }
 plasmacoll = { git = "https://github.com/max-models/plasmacoll", branch = "devel" }
+scope-profiler = { git = "https://github.com/max-models/scope-profiler", branch = "devel" }
 simgeometry = { git = "https://github.com/max-models/simgeometry", branch = "devel" }

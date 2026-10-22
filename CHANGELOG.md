@@ -7,6 +7,14 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Opt-in scope-profiler regions (`tree_d_3d.<module>.<operation>`) around the tree build,
+  moments, tree walk, FMM, direct sum, simulation step and field evaluation, electrode
+  factorisation, solve and panel field, and the grounded-strip field. They record nothing
+  unless the application enables the `tree_d_3d` tag (`scope_profiler.setup(enable_tags=
+  ["tree_d_3d"])`, `SCOPE_PROFILER_ENABLE_TAGS` or `scope-profiler run --enable-tag`).
+  Needs `scope-profiler>=0.7.5`, which uv takes from scope-profiler's `devel` branch
+  (`[tool.uv.sources]`) until that release is on PyPI.
+
 - `BoundaryIntegralElectrodes` treats panels within `near_field` (4) of their own lengths of a
   target with the exact potential and field of a uniformly charged segment
   (`segment_field`), and sums farther panels fast as `far_points` (2) Gauss-Legendre point

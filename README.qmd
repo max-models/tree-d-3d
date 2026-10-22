@@ -105,6 +105,23 @@ print(sim.get_total_energy())
 On the CuPy backend (`cunumpy.use_backend("cupy")`) the trees and direct sums take and
 return CuPy arrays and run the CUDA kernels.
 
+## Profiling
+
+The tree builds, field evaluations, FMM passes, simulation steps and electrode solves are
+[scope-profiler](https://github.com/max-models/scope-profiler) regions named
+`tree_d_3d.<module>.<operation>`. They are off by default, so profiling your own code does not
+record them; enable their opt-in tag `tree_d_3d` to see them:
+
+```python
+import scope_profiler as sp
+
+sp.setup(enable_tags=["tree_d_3d"])
+```
+
+or set `SCOPE_PROFILER_ENABLE_TAGS=tree_d_3d`, or run
+`scope-profiler run --enable-tag tree_d_3d script.py`. Switched off, a region costs 0.1-0.2 µs
+per call.
+
 ## Example
 
 `examples/conserving_tree_code.py` (needs `tree-d-3d[examples]`, i.e. Plotly through

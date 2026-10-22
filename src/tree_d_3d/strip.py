@@ -35,8 +35,10 @@ one pair's field there). Coincident charges are an error either way.
 from __future__ import annotations
 
 import numpy as np
+import scope_profiler as sp
 from scipy.spatial import cKDTree  # pyright: ignore[reportAttributeAccessIssue]
 
+from tree_d_3d._profiling import _PROFILE_TAGS
 from tree_d_3d._utils import _host
 from tree_d_3d.constants import K_E
 from tree_d_3d.flat_tree import FlatQuadtree, direct_field
@@ -129,6 +131,7 @@ class GroundedStripField:
         if status[0]:
             raise ValueError("Coincident charges")
 
+    @sp.profile("tree_d_3d.strip.field_at_charges", tags=_PROFILE_TAGS)
     def field_at_charges(
         self, positions, charges, *, potential: bool = True
     ) -> tuple[np.ndarray, np.ndarray]:
@@ -185,6 +188,7 @@ class GroundedStripField:
         """Potential (V) at arbitrary ``points`` strictly between the plates."""
         return self.probe(positions, charges, points)[0]
 
+    @sp.profile("tree_d_3d.strip.probe", tags=_PROFILE_TAGS)
     def probe(self, positions, charges, points) -> tuple[np.ndarray, np.ndarray]:
         """Potential (V) and field (V/m, shape (2, M)) at ``points`` ``(2, M)``.
 
