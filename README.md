@@ -29,8 +29,10 @@ planned.
 - `ElectrostaticSimulation`: time integration of `ChargedBody`
   particles, second order, with a uniform magnetic field `B_z`,
   absorbing walls, absorbing objects (any 2D
-  [simgeometry](https://github.com/max-models/simgeometry) shape) and
-  cached fields (one field evaluation per step).
+  [simgeometry](https://github.com/max-models/simgeometry) shape, tested
+  along the whole step so no particle jumps over a thin plate, with the
+  charge collected per object) and cached fields (one field evaluation
+  per step).
 - `GroundedStripField`: line charges between two grounded plates, by
   conformal mapping and the FMM, including the image force of the
   plates.

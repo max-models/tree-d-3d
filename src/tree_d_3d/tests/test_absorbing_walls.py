@@ -190,3 +190,92 @@ def test_absorbing_objects_are_validated():
             absorbing_objects={"x_max": Circle(midpoint=(5, 5), radius=0.5)},
             **kwargs,
         )
+
+
+def _slit():
+    from simgeometry import Aperture2D
+
+    # plates 0.02 thick at x = 0, from |y| = 0.2 to 0.8
+    return Aperture2D.slit(0.0, 0.2, 0.02, 0.6)
+
+
+def test_steps_through_a_thin_plate_are_absorbed():
+    bodies = [
+        ChargedBody(-0.3, 0.0, vx=1.0, charge=0),  # through the aperture
+        ChargedBody(-0.3, 0.5, vx=1.0, charge=0),  # at the upper plate
+        ChargedBody(-0.3, -0.5, vx=1.0, charge=0),  # at the lower plate
+        ChargedBody(-0.03, 0.15, vx=0.5, vy=1.0, charge=0),  # cuts a plate corner
+    ]
+    sim = Simulation(
+        bodies, Quad(0, 0, 1), k_e=1, dt=0.2, absorbing_objects={"slit": _slit()}
+    )
+    for _ in range(3):
+        sim.step()
+    # each step (0.2) is ten times the plate thickness: the absorbed particles
+    # stepped over the plate and ended beyond it
+    assert sim.absorbed.counts() == {"slit": 3}
+    assert sim.bodies == [bodies[0]] and bodies[0].pos[0] > 0.2
+    assert np.all(sim.absorbed.position[0] > 0.01)
+    np.testing.assert_allclose(sim.absorbed.time, [0.2, 0.4, 0.4])
+
+
+def test_the_object_crossed_first_takes_the_particle():
+    from simgeometry import Circle, Polygon
+
+    square = Polygon([(0.3, -0.1), (0.3, 0.1), (0.4, 0.1), (0.4, -0.1)])
+    disc = Circle(midpoint=(0.6, 0.0), radius=0.05)
+    bodies = [
+        ChargedBody(0.0, 0.0, vx=1.0, charge=0),  # square, then disc
+        ChargedBody(0.9, 0.0, vx=-1.0, charge=0),  # disc, then square
+        ChargedBody(0.0, 0.5, vx=1.0, charge=0),  # misses both
+    ]
+    for objects in ({"square": square, "disc": disc}, {"disc": disc, "square": square}):
+        sim = Simulation(
+            [ChargedBody(*b.pos, *b.vel, charge=0) for b in bodies],
+            Quad(0, 0, 1),
+            k_e=1,
+            dt=1.0,
+            absorbing_objects=objects,
+        )
+        sim.step()
+        assert list(sim.absorbed.wall) == ["square", "disc"]
+        assert sim.num_particles == 1
+
+
+def test_absorbed_and_remaining_charge_add_up():
+    from simgeometry import Circle
+
+    rng = np.random.default_rng(3)
+    n = 200
+    positions = np.vstack([rng.uniform(-0.6, -0.05, n), rng.uniform(-0.6, 0.6, n)])
+    velocities = np.vstack([rng.uniform(0.5, 3.0, n), rng.normal(0, 0.5, n)])
+    charges = rng.choice([-1.0, 2.0], n)
+    bodies = [
+        ChargedBody(*positions[:, i], *velocities[:, i], charge=charges[i])
+        for i in range(n)
+    ]
+    objects = {
+        "slit": _slit(),
+        "chamber": Circle(midpoint=(0.0, 0.0), radius=0.95, inverted=True),
+    }
+    sim = Simulation(
+        bodies,
+        Quad(0, 0, 1),
+        k_e=1e-4,
+        softening=0.05,
+        dt=0.05,
+        method="direct",
+        absorbing_objects=objects,
+    )
+    for _ in range(20):
+        sim.step()
+    assert set(sim.absorbed.counts()) == {"slit", "chamber"}
+    assert len(sim.bodies) + len(sim.absorbed) == n
+    per_object = sim.absorbed.charges()
+    assert sum(per_object.values()) == pytest.approx(sim.absorbed.total_charge)
+    assert sim.get_total_charge() + sim.absorbed.total_charge == pytest.approx(
+        charges.sum()
+    )
+    # no remaining particle sits in a plate or outside the chamber
+    assert not np.any(objects["slit"].contains_points(sim.positions))
+    assert np.all(np.hypot(*sim.positions) <= 0.95)
