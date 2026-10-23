@@ -234,8 +234,11 @@ class ElectrostaticSimulation:
         n = end.shape[1]
         names = list(self._objects)
         shapes = list(self._objects.values())
-        if start is not None:
-            moved = np.flatnonzero(np.any(start != end, axis=0))
+        moved = (
+            np.zeros(0, dtype=int)
+            if start is None
+            else np.flatnonzero(np.any(start != end, axis=0))
+        )
         # the other shapes: parameter of the first crossing along the step, 0 for
         # an end inside without one, 2 for no hit (the polygon kernel's convention)
         packed = polygon_objects(shapes)
