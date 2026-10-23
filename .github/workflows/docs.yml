@@ -67,7 +67,7 @@ jobs:
 
   docs:
     needs: examples
-    uses: max-models/starlight-theme/.github/workflows/docs.yml@v0.4.0
+    uses: max-models/starlight-theme/.github/workflows/docs.yml@v0.5.0
     with:
       pre-build: |
         mkdir -p docs/.cache/examples
