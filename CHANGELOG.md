@@ -38,6 +38,13 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   drift inside a simgeometry shape, recorded under its name in `absorbed`.
 - The einzel-lens, ion-extraction and boundary-integral examples build their electrodes from
   simgeometry shapes (`Aperture2D`, `Circle`, `Polygon`).
+- Absorbing objects test the whole step, not just its end: a particle whose step crosses an
+  object's boundary is absorbed by the object it meets first, so none jumps over a plate
+  thinner than `|v| dt`. `Polygon` and `Aperture2D` objects go through simgeometry's
+  compiled swept polygon kernel (`simgeometry.polygon_objects`, shared with picnic), other
+  shapes through their `crossings`. `AbsorbedParticles.charges()` gives the charge collected
+  by each wall and object. The ion-extraction example uses the swept test for its plate hits
+  instead of its own mid-plane check.
 
 ### Changed
 

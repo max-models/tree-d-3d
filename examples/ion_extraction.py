@@ -5,7 +5,9 @@ to pull an ion beam out of a plasma source (as in ``picnic``'s electrode setups)
 "plasma electrode" with a narrow aperture, a gap, then an "extractor electrode" at a large
 negative bias with a wider aperture. Each electrode is a simgeometry ``Aperture2D`` (two
 plates of finite thickness), panelled by :func:`tree_d_3d.conductors_from_shape` with panels
-graded toward the aperture tips, and its ``contains_points`` tells which ions hit a plate.
+graded toward the aperture tips, and simgeometry's swept polygon test
+(:func:`simgeometry.polygon_objects.polygon_objects`) tells which ions hit a plate during a
+step, not only at its end.
 Ions are continuously supplied from a small reservoir pressed against the plasma-electrode
 aperture (representing the plasma meniscus) and are pushed by the combined field of the two
 electrodes (:class:`tree_d_3d.BoundaryIntegralElectrodes`, re-solved every step for the
@@ -51,6 +53,7 @@ import numpy as np
 import plotly.graph_objects as go
 from plasma_plots import save_figure
 from simgeometry import Aperture2D
+from simgeometry.polygon_objects import polygon_objects
 
 from tree_d_3d import (
     BoundaryIntegralElectrodes,
@@ -190,6 +193,8 @@ class ExtractionSource:
             (X0, A0, slit_electrode(X0, A0)),
             (X1, A1, slit_electrode(X1, A1)),
         ]
+        #: both electrodes, packed for the swept plate-hit test
+        self.packed_plates = polygon_objects([shape for _, _, shape in self.plates])
         conductors = [
             conductor
             for (_, half_ap, shape), potential in zip(self.plates, (0.0, -v_ext))
@@ -243,16 +248,13 @@ class ExtractionSource:
     def step(self) -> None:
         """Leapfrog: half-kick, drift, absorb/collect/recycle, half-kick."""
         self.vel = self.vel + 0.5 * DT * self._acc
-        x_prev = self.pos[0].copy()
+        pos_prev = self.pos
         self.pos = self.pos + DT * self.vel
 
-        # inside a plate at the end of the step, or through its mid-plane outside the
-        # aperture during it (so a fast ion cannot step over a plate)
-        hit_plate = np.zeros(self.pos.shape[1], dtype=bool)
-        for x_e, half_ap, shape in self.plates:
-            crossed = (x_prev - x_e) * (self.pos[0] - x_e) <= 0
-            hit_plate |= crossed & (np.abs(self.pos[1]) > half_ap)
-            hit_plate |= np.asarray(shape.contains_points(self.pos), dtype=bool)
+        # inside a plate at the end of the step, or through one during it (so a fast
+        # ion cannot step over a plate)
+        alive = np.ones(self.pos.shape[1], dtype=bool)
+        hit_plate = self.packed_plates.absorb(self.pos, alive, start=pos_prev) >= 0
         collected = self.pos[0] > self.x_final
         off_axis = np.abs(self.pos[1]) > PLATE_LENGTH + max(A0, A1) + 2
         back = self.pos[0] < RESERVOIR_X[0] - 1.0

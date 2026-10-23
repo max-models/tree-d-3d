@@ -104,6 +104,13 @@ class AbsorbedParticles:
         names, counts = np.unique(self.wall, return_counts=True)
         return {str(name): int(count) for name, count in zip(names, counts)}
 
+    def charges(self) -> dict[str, float]:
+        """Charge absorbed at each wall and object (per electrode, its collected current times the run time)."""
+        return {
+            str(name): float(np.sum(self.charge[self.wall == name]))
+            for name in np.unique(self.wall)
+        }
+
     def __len__(self) -> int:
         return len(self.bodies)
 
@@ -134,9 +141,15 @@ class ElectrostaticSimulation:
     ``Circle``, ``Polygon``, ``Aperture2D``, ...). A particle that ends a drift
     inside one is removed the same way and recorded under its name; an
     inverted shape absorbs everything outside it, such as a round chamber
-    wall. Only end points are tested, so keep ``|v| dt`` below the thickness of
-    the thinnest object. Like walls, objects do not change the field: for
-    electrodes, pair them with :class:`tree_d_3d.BoundaryIntegralElectrodes`.
+    wall. The whole step is tested, not just its end, so a particle cannot
+    jump over a plate thinner than ``|v| dt``: it is absorbed by the object
+    whose boundary its step crosses first (``Polygon`` and ``Aperture2D``
+    exactly, by simgeometry's compiled swept polygon kernel; other shapes by
+    their ``crossings``). The step is the straight chord from the old to the
+    new position: with ``B_z`` it lies within ``|v| dt theta / 8`` of the
+    gyration arc, ``theta`` the gyration angle per step. Like walls,
+    objects do not change the field: for electrodes, pair them with
+    :class:`tree_d_3d.BoundaryIntegralElectrodes`.
 
     ``kernel="log"`` makes every particle an infinite line charge per unit
     length along z, the interaction of 2D Cartesian PIC, instead of a point
@@ -182,10 +195,14 @@ class ElectrostaticSimulation:
         self._fixed_fields_done = False
         self._tree = None
 
-    def _outside_walls(self) -> tuple[np.ndarray, np.ndarray]:
+    def _outside_walls(
+        self, start: np.ndarray | None = None
+    ) -> tuple[np.ndarray, np.ndarray]:
         """Mask of absorbed particles, and the name of the deepest wall crossed or object entered.
 
-        Walls take precedence over objects.
+        With ``start`` (the positions before the drift) a particle also enters
+        an object when its step crosses the object's boundary. Walls take
+        precedence over objects.
         """
         n = self.num_particles
         depth = np.zeros(n)
@@ -195,10 +212,92 @@ class ElectrostaticSimulation:
             deeper = beyond > depth
             depth[deeper] = beyond[deeper]
             name[deeper] = wall
-        for obj, shape in self._objects.items():
-            inside = _host(shape.contains_points(self.positions)).astype(bool)
-            name[inside & (name == "")] = obj
+        if self._objects:
+            entered = self._entered_objects(start)
+            free = name == ""
+            name[free] = entered[free]
         return name != "", name
+
+    def _entered_objects(self, start: np.ndarray | None) -> np.ndarray:
+        """The name of the object each particle entered first along its step ("": none).
+
+        ``Polygon`` and ``Aperture2D`` objects are tested together by
+        simgeometry's swept polygon kernel (exact along the step), the other
+        shapes by their ``crossings`` (exact for circles, axis-aligned boxes and
+        polygonal shapes, sampled otherwise) and ``contains_points``. Where a
+        step meets both kinds, the earlier crossing wins.
+        """
+        from simgeometry.kernels.polygon_hits import object_hit_times
+        from simgeometry.polygon_objects import polygon_objects
+
+        end = self.positions
+        n = end.shape[1]
+        names = list(self._objects)
+        shapes = list(self._objects.values())
+        moved = (
+            np.zeros(0, dtype=int)
+            if start is None
+            else np.flatnonzero(np.any(start != end, axis=0))
+        )
+        # the other shapes: parameter of the first crossing along the step, 0 for
+        # an end inside without one, 2 for no hit (the polygon kernel's convention)
+        packed = polygon_objects(shapes)
+        polygon_index = () if packed is None else packed.index
+        other_time = np.full(n, 2.0)
+        other = np.full(n, -1)
+        for index, shape in enumerate(shapes):
+            if index in polygon_index:
+                continue
+            time = np.where(_host(shape.contains_points(end)).astype(bool), 0.0, 2.0)
+            if start is not None and moved.size:
+                hits = shape.crossings(start[:, moved], end[:, moved])
+                crossed = _host(hits.hit).astype(bool)
+                time[moved[crossed]] = _host(hits.fraction)[crossed]
+            earlier = time < other_time
+            other_time[earlier] = time[earlier]
+            other[earlier] = index
+        first = other
+        if packed is not None:
+            alive = xp.ones(n, dtype=bool)
+            slot = _host(
+                packed.absorb(
+                    _device(end),
+                    alive,
+                    start=None if start is None else _device(start),
+                )
+            )
+            polygon = np.full(n, -1)
+            polygon[slot >= 0] = np.asarray(packed.index)[slot[slot >= 0]]
+            # steps that met both a polygon object and another shape
+            both = np.flatnonzero((slot >= 0) & (other >= 0))
+            polygon_time = np.zeros(n)
+            if both.size:
+                x1, y1 = end[0, both], end[1, both]
+                x0, y0 = (x1, y1) if start is None else (start[0, both], start[1, both])
+                vertices, offsets = _host(packed.vertices), _host(packed.offsets)
+                for k in np.unique(slot[both]):
+                    rows = slot[both] == k
+                    polygon_time[both[rows]] = object_hit_times(
+                        vertices,
+                        offsets,
+                        int(packed.first_host[k]),
+                        int(packed.last_host[k]),
+                        int(packed.inverted_host[k]),
+                        x0[rows],
+                        y0[rows],
+                        x1[rows],
+                        y1[rows],
+                        np.full(int(rows.sum()), start is not None),
+                    )
+            take = (polygon >= 0) & (
+                (other < 0)
+                | (polygon_time < other_time)
+                | ((polygon_time == other_time) & (polygon < other))
+            )
+            first = np.where(take, polygon, other)
+        result = np.full(n, "", dtype=object)
+        result[first >= 0] = np.asarray(names, dtype=object)[first[first >= 0]]
+        return result
 
     def __init__(
         self,
@@ -289,13 +388,17 @@ class ElectrostaticSimulation:
     def absorbing_objects(self) -> dict[str, Shape]:
         return dict(self._objects)
 
-    def _absorb(self) -> None:
-        """Remove particles beyond a wall or inside an object and record them."""
+    def _absorb(self, start: np.ndarray | None = None) -> None:
+        """Remove particles beyond a wall or inside an object and record them.
+
+        ``start`` holds the positions before the drift, for the swept object test.
+        """
         if not self._walls and not self._objects:
             return
         if len(self.bodies) != self.num_particles:
             self._adopt()
-        outside, name = self._outside_walls()
+            start = None
+        outside, name = self._outside_walls(start)
         if not np.any(outside):
             return
         removed = np.flatnonzero(outside)
@@ -521,11 +624,12 @@ class ElectrostaticSimulation:
         a = np.sinc(angle / np.pi)
         b = 0.5 * angle * np.sinc(angle / (2 * np.pi)) ** 2
         vx, vy = vel[0, mobile], vel[1, mobile]
+        start = self.positions.copy() if self._objects else None
         self.positions[:, mobile] += self.dt * np.stack(
             (a * vx + b * vy, a * vy - b * vx)
         )
         vel[:, mobile] = np.stack((c * vx + s * vy, c * vy - s * vx))
-        self._absorb()
+        self._absorb(start)
         tree = self.compute_fields(include_fixed=False)
         vel = self.velocities
         mobile = ~self.fixed
