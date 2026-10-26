@@ -28,3 +28,4 @@ def test_cupy_backend_matches_numpy_with_emulated_cuda_kernels():
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "evaluate_quadtree" in result.stdout and "fmm_m2l" in result.stdout
+    assert "absorb_polygons_2d" in result.stdout

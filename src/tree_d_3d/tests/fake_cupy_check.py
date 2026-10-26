@@ -59,7 +59,49 @@ with xp.use_backend("cupy"):
     assert xp.get_backend() == "cupy"
     actual = run()
 
+
+def absorb_run(n=60):
+    """A short run with absorbing objects: the swept polygon kernel and crossings."""
+    from simgeometry import Aperture2D, Circle
+
+    from tree_d_3d.bodies import ChargedBody
+    from tree_d_3d.simulation import ElectrostaticSimulation
+
+    rng = np.random.default_rng(5)
+    x = rng.uniform(-0.6, -0.05, n)
+    y = rng.uniform(-0.6, 0.6, n)
+    vx = rng.uniform(0.5, 3.0, n)
+    vy = rng.normal(0, 0.5, n)
+    bodies = [ChargedBody(x[i], y[i], vx[i], vy[i], charge=1.0) for i in range(n)]
+    objects = {
+        "slit": Aperture2D.slit(0.0, 0.2, 0.02, 0.6),
+        "chamber": Circle(midpoint=(0.0, 0.0), radius=0.95, inverted=True),
+    }
+    sim = ElectrostaticSimulation(
+        bodies,
+        Quad(0, 0, 1),
+        k_e=1e-4,
+        softening=0.05,
+        dt=0.05,
+        method="direct",
+        absorbing_objects=objects,
+    )
+    for _ in range(10):
+        sim.step()
+    return list(sim.absorbed.wall), np.asarray(xp.to_numpy(sim.positions))
+
+
+with xp.use_backend("numpy"):
+    expected_absorbed = absorb_run()
+with xp.use_backend("cupy"):
+    actual_absorbed = absorb_run()
+
 failed = False
+same = expected_absorbed[0] == actual_absorbed[0] and np.allclose(
+    expected_absorbed[1], actual_absorbed[1], rtol=1e-10, atol=1e-12
+)
+failed |= not same or not expected_absorbed[0]
+print(f"absorb  {len(expected_absorbed[0])} absorbed {'ok' if same else 'MISMATCH'}")
 for key in expected:
     for a, b in zip(expected[key], actual[key]):
         scale = np.abs(a).max()
