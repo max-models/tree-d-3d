@@ -192,33 +192,6 @@ class BoxTree:
 class SmoothFMM:
     """Potential energy and exact-gradient forces of line charges on a :class:`BoxTree`."""
 
-    def __init__(
-        self,
-        tree: BoxTree,
-        pos: np.ndarray,
-        charge: np.ndarray,
-        *,
-        order: int = 12,
-        theta: float = 0.5,
-        band: float = 0.0,
-        symmetric: bool = True,
-        softening: float = 0.0,
-    ) -> None:
-        """Build the tree data for these positions and charges.
-
-        ``softening`` is the radius of the compact charge cloud each particle is
-        (beyond it the kernel is the bare one, so the far field is exact).
-        """
-        self.tree = tree
-        self.z = np.asarray(pos[0], dtype=float) + 1j * np.asarray(pos[1], dtype=float)
-        self.q = np.asarray(charge, dtype=float)
-        self.order = int(order)
-        self.theta = float(theta)
-        self.band = float(band)
-        self.symmetric = bool(symmetric)
-        self.eps2 = float(softening) ** 2
-        self._compute()
-
     # -- structure -------------------------------------------------------------
     def _traverse(self, occupied: np.ndarray):
         """Dual-tree traversal over occupied nodes: lists of M2L and P2P node pairs."""
@@ -355,6 +328,33 @@ class SmoothFMM:
             np.add.at(phi_m, mb, kern.T @ qa)
             np.add.at(g_m, mb, (-grad).T @ qa)
         self.phi_m, self.g_m = phi_m, g_m
+
+    def __init__(
+        self,
+        tree: BoxTree,
+        pos: np.ndarray,
+        charge: np.ndarray,
+        *,
+        order: int = 12,
+        theta: float = 0.5,
+        band: float = 0.0,
+        symmetric: bool = True,
+        softening: float = 0.0,
+    ) -> None:
+        """Build the tree data for these positions and charges.
+
+        ``softening`` is the radius of the compact charge cloud each particle is
+        (beyond it the kernel is the bare one, so the far field is exact).
+        """
+        self.tree = tree
+        self.z = np.asarray(pos[0], dtype=float) + 1j * np.asarray(pos[1], dtype=float)
+        self.q = np.asarray(charge, dtype=float)
+        self.order = int(order)
+        self.theta = float(theta)
+        self.band = float(band)
+        self.symmetric = bool(symmetric)
+        self.eps2 = float(softening) ** 2
+        self._compute()
 
     # -- results ---------------------------------------------------------------
     @property

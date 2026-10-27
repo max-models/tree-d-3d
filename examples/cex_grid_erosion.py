@@ -366,6 +366,24 @@ def classify_faces(point, normal):
     return face
 
 
+def add_plates(fig: go.Figure, shapes) -> None:
+    """Draw the grids and the boundary plates as filled outlines."""
+    for name, shape in shapes.items():
+        for loop in shape.outlines():
+            fig.add_trace(
+                go.Scatter(
+                    x=np.append(loop[0], loop[0, 0]),
+                    y=np.append(loop[1], loop[1, 0]),
+                    mode="lines",
+                    fill="toself",
+                    fillcolor="black" if name in GRIDS else "lightgray",
+                    line={"color": "black", "width": 1},
+                    hoverinfo="skip",
+                    showlegend=False,
+                )
+            )
+
+
 def main(argv: list[str] | None = None) -> Path:
     """Run the charge-exchange study and write the figures; return the output directory."""
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
@@ -666,24 +684,6 @@ def main(argv: list[str] | None = None) -> Path:
 
     print(f"figures in {output}")
     return output
-
-
-def add_plates(fig: go.Figure, shapes) -> None:
-    """Draw the grids and the boundary plates as filled outlines."""
-    for name, shape in shapes.items():
-        for loop in shape.outlines():
-            fig.add_trace(
-                go.Scatter(
-                    x=np.append(loop[0], loop[0, 0]),
-                    y=np.append(loop[1], loop[1, 0]),
-                    mode="lines",
-                    fill="toself",
-                    fillcolor="black" if name in GRIDS else "lightgray",
-                    line={"color": "black", "width": 1},
-                    hoverinfo="skip",
-                    showlegend=False,
-                )
-            )
 
 
 if __name__ == "__main__":

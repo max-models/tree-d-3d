@@ -4119,7 +4119,7 @@ wheels = [
 [[package]]
 name = "simgeometry"
 version = "0.1.1"
-source = { git = "https://github.com/max-models/simgeometry?branch=devel#657cb48a0aa9974349fdc3ade7972a60a8a7d915" }
+source = { git = "https://github.com/max-models/simgeometry?branch=devel#36fa30f142eda33c63653ebf24121818e9c68ecc" }
 dependencies = [
     { name = "cunumpy" },
     { name = "maybempi" },
@@ -4127,6 +4127,7 @@ dependencies = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
     { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "scope-profiler" },
 ]
 
 [[package]]
