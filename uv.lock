@@ -912,13 +912,14 @@ wheels = [
 [[package]]
 name = "cunumpy"
 version = "0.7.1"
-source = { git = "https://github.com/max-models/cunumpy?branch=devel#870f51868b23d4ab9945ee48d7156a744647f95a" }
+source = { git = "https://github.com/max-models/cunumpy?branch=devel#92b38a5a0e00d7ccf03aa39849d6c7eaee946859" }
 dependencies = [
     { name = "array-api-compat" },
     { name = "maybempi" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
     { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "scope-profiler" },
 ]
 
 [[package]]

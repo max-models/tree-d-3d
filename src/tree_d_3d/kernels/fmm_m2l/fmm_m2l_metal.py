@@ -2,7 +2,7 @@
 
 ``fmm_m2l_pyccel.py`` next to this file is the CPU version with the same arguments.
 One thread per pair adds into zeroed atomic float32 delta arrays (see
-:mod:`tree_d_3d.kernels._metal_atomic`); the host adds those to the local expansions in
+:meth:`~cunumpy.kernels.KernelPackage.metal_kernel` with ``atomic_outputs=True``); the host adds those to the local expansions in
 float64. The shifts sum alternating terms with binomials up to about C(2p, p), so in
 float32 the accuracy degrades with the order p (about 1e-4 relative at p = 12); the
 per-thread scratch holds orders up to ``TREE_D_3D_MAX_ORDER`` = 64, as on CUDA. The
@@ -14,7 +14,7 @@ from __future__ import annotations
 import numpy as np
 
 from tree_d_3d._types import Array
-from tree_d_3d.kernels._metal_atomic import make_atomic_kernel
+from tree_d_3d.kernels import KERNEL_PACKAGE
 
 _HEADER = "#define TREE_D_3D_MAX_ORDER 64\n"
 
@@ -74,12 +74,13 @@ _SOURCE = """
     }
 """
 
-_KERNEL = make_atomic_kernel(
+_KERNEL = KERNEL_PACKAGE.metal_kernel(
     "tree_d_3d_fmm_m2l",
     _SOURCE,
     inputs=["pairs", "node_center", "moment_re", "moment_im", "binomial", "symmetric"],
     outputs=["local_re_delta", "local_im_delta"],
     header=_HEADER,
+    atomic_outputs=True,
 )
 
 

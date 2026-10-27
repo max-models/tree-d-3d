@@ -6,8 +6,6 @@ Pyccel version, or the NumPy version if Pyccel is unavailable (see
 ``cunumpy.kernels.set_host_kernel_implementation`` to choose).
 """
 
-import cunumpy as xp
+from tree_d_3d.kernels import KERNEL_PACKAGE
 
-from tree_d_3d.kernels._build import KERNEL_OPTIONS
-
-kernel = xp.kernels.Kernel.from_folder(__name__, **KERNEL_OPTIONS)
+kernel = KERNEL_PACKAGE.from_folder(__name__)

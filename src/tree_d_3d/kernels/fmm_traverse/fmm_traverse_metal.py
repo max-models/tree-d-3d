@@ -15,7 +15,7 @@ from __future__ import annotations
 import numpy as np
 
 from tree_d_3d._types import Array
-from tree_d_3d.kernels._metal import make_kernel
+from tree_d_3d.kernels import KERNEL_PACKAGE
 
 SKIP, P2P, M2L, SPLIT_SELF, SPLIT_A, SPLIT_B = range(6)
 
@@ -48,7 +48,7 @@ _SOURCE = """
     code[k] = split_a ? 4 : 5;
 """
 
-_KERNEL = make_kernel(
+_KERNEL = KERNEL_PACKAGE.metal_kernel(
     "tree_d_3d_fmm_traverse",
     _SOURCE,
     inputs=[

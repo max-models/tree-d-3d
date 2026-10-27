@@ -8,7 +8,7 @@ are a permutation); integer only, so exact. See :mod:`tree_d_3d.kernels._metal`.
 from __future__ import annotations
 
 from tree_d_3d._types import Array
-from tree_d_3d.kernels._metal import make_kernel
+from tree_d_3d.kernels import KERNEL_PACKAGE
 
 _SOURCE = """
     uint k = thread_position_in_grid.x;
@@ -28,7 +28,7 @@ _SOURCE = """
     new_slot_node[slot] = child;
 """
 
-_KERNEL = make_kernel(
+_KERNEL = KERNEL_PACKAGE.metal_kernel(
     "tree_d_3d_quadtree_scatter",
     _SOURCE,
     inputs=["perm", "slot_node", "quadrant", "below", "node_start", "node_child"],
