@@ -126,6 +126,13 @@ class TabulatedField:
             & (points[1] <= self.y[-1])
         )
 
+    @staticmethod
+    def _cell(grid: np.ndarray, coordinate: np.ndarray):
+        """Index of the cell holding each coordinate (clamped) and the fraction across it."""
+        f = np.clip((coordinate - grid[0]) / (grid[1] - grid[0]), 0.0, grid.size - 1.0)
+        index = np.asarray(np.minimum(f.astype(np.int64), grid.size - 2))
+        return index, np.asarray(f - index)
+
     def __call__(self, points) -> tuple[np.ndarray, np.ndarray]:
         points = np.asarray(points, dtype=float).reshape(2, -1)
         i, fx = self._cell(self.x, points[0])
@@ -142,13 +149,6 @@ class TabulatedField:
             phi += w * self.potential[a, b]
             field += w * self.field[:, a, b]
         return phi, field
-
-    @staticmethod
-    def _cell(grid: np.ndarray, coordinate: np.ndarray):
-        """Index of the cell holding each coordinate (clamped) and the fraction across it."""
-        f = np.clip((coordinate - grid[0]) / (grid[1] - grid[0]), 0.0, grid.size - 1.0)
-        index = np.asarray(np.minimum(f.astype(np.int64), grid.size - 2))
-        return index, np.asarray(f - index)
 
 
 class OutlinedShape(Protocol):
@@ -208,6 +208,46 @@ class BoundaryIntegralElectrodes:
     ``(L / r) ** (2 * far_points)``. ``near_field=0, far_points=1`` gives the plain
     midpoint rule.
     """
+
+    def _near_pairs(self, points: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Target and panel indices of the pairs closer than ``near_field`` panel lengths."""
+        empty = np.zeros(0, dtype=np.int64)
+        if not self.near_field or not points.shape[1]:
+            return empty, empty
+        radius = self.near_field * float(self.lengths.max())
+        pairs = KDTree(points.T).sparse_distance_matrix(
+            self._panel_tree, radius, output_type="ndarray"
+        )
+        if not pairs.size:
+            return empty, empty
+        target = pairs["i"].astype(np.int64)
+        panel = pairs["j"].astype(np.int64)
+        distance = pairs["v"]
+        keep = distance < self.near_field * self.lengths[panel]
+        return target[keep], panel[keep]
+
+    def _build_matrix(self) -> np.ndarray:
+        """The dense ``S``: Gauss nodes for far pairs, exact segments for near ones."""
+        k = self.far_points
+        matrix = np.zeros((self.num_panels, self.num_panels))
+        with np.errstate(divide="ignore"):
+            for g in range(k):
+                nodes = self._nodes[:, g::k]
+                diff = self.midpoints[:, :, None] - nodes[:, None, :]
+                # -2 ln r = -ln r^2, per unit panel charge
+                matrix -= self._weights[g] * np.log(np.sum(diff**2, axis=0))
+        target, panel = self._near_pairs(self.midpoints)
+        off = target != panel
+        target, panel = target[off], panel[off]
+        if target.size:
+            matrix[target, panel] = segment_field(
+                self.midpoints[:, target], self.starts[:, panel], self.ends[:, panel]
+            )[0]
+        # self term: the raw potential at a panel's own midpoint from its charge spread
+        # uniformly over its length L, integral_{-L/2}^{L/2} -2 ln|t| dt / L * L = ...
+        self_term = 2.0 * (1.0 - np.log(self.lengths / 2.0))
+        np.fill_diagonal(matrix, self_term)
+        return matrix
 
     def __init__(
         self,
@@ -274,23 +314,6 @@ class BoundaryIntegralElectrodes:
         self._source_positions = np.zeros((2, 0))
         self._source_charges = np.zeros(0)
 
-    def _near_pairs(self, points: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """Target and panel indices of the pairs closer than ``near_field`` panel lengths."""
-        empty = np.zeros(0, dtype=np.int64)
-        if not self.near_field or not points.shape[1]:
-            return empty, empty
-        radius = self.near_field * float(self.lengths.max())
-        pairs = KDTree(points.T).sparse_distance_matrix(
-            self._panel_tree, radius, output_type="ndarray"
-        )
-        if not pairs.size:
-            return empty, empty
-        target = pairs["i"].astype(np.int64)
-        panel = pairs["j"].astype(np.int64)
-        distance = pairs["v"]
-        keep = distance < self.near_field * self.lengths[panel]
-        return target[keep], panel[keep]
-
     @sp.profile("tree_d_3d.electrodes.panel_field", tags=_PROFILE_TAGS)
     def _panel_field(self, points: np.ndarray, charge: np.ndarray):
         """Raw potential and field at ``points`` from panels carrying ``charge``.
@@ -330,29 +353,6 @@ class BoundaryIntegralElectrodes:
                 e[axis] += np.bincount(target, q * seg_e[axis], m)
                 e[axis] -= np.bincount(node_target[off], qn * pt_e[axis], m)
         return phi, e
-
-    def _build_matrix(self) -> np.ndarray:
-        """The dense ``S``: Gauss nodes for far pairs, exact segments for near ones."""
-        k = self.far_points
-        matrix = np.zeros((self.num_panels, self.num_panels))
-        with np.errstate(divide="ignore"):
-            for g in range(k):
-                nodes = self._nodes[:, g::k]
-                diff = self.midpoints[:, :, None] - nodes[:, None, :]
-                # -2 ln r = -ln r^2, per unit panel charge
-                matrix -= self._weights[g] * np.log(np.sum(diff**2, axis=0))
-        target, panel = self._near_pairs(self.midpoints)
-        off = target != panel
-        target, panel = target[off], panel[off]
-        if target.size:
-            matrix[target, panel] = segment_field(
-                self.midpoints[:, target], self.starts[:, panel], self.ends[:, panel]
-            )[0]
-        # self term: the raw potential at a panel's own midpoint from its charge spread
-        # uniformly over its length L, integral_{-L/2}^{L/2} -2 ln|t| dt / L * L = ...
-        self_term = 2.0 * (1.0 - np.log(self.lengths / 2.0))
-        np.fill_diagonal(matrix, self_term)
-        return matrix
 
     @sp.profile("tree_d_3d.electrodes.solve", tags=_PROFILE_TAGS)
     def solve(self, source_positions=None, source_charges=None) -> np.ndarray:

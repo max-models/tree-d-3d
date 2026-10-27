@@ -147,6 +147,10 @@ class Sheath:
     numerical precision; a tall box is the wrong way to add more particles here.
     """
 
+    def _accel(self) -> np.ndarray:
+        _, field = self.field.field_at_charges(self.pos, self.charge, potential=False)
+        return (self.charge * field) / self.mass[None, :]
+
     def __init__(
         self,
         L: float,
@@ -187,10 +191,6 @@ class Sheath:
         self.history_t = [0.0]
         self.history_n = [(n_half, n_half)]
         self._acc = self._accel()
-
-    def _accel(self) -> np.ndarray:
-        _, field = self.field.field_at_charges(self.pos, self.charge, potential=False)
-        return (self.charge * field) / self.mass[None, :]
 
     def counts(self) -> tuple[int, int]:
         return (

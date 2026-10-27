@@ -125,6 +125,10 @@ def _add_player(
     )
 
 
+PLATE_LENGTH = 10.0
+THICKNESS = 0.4
+
+
 def slit_electrode(x: float, half_aperture: float) -> Aperture2D:
     """The two plates (above and below the aperture) of a slit electrode centred at ``x``.
 
@@ -155,8 +159,6 @@ def panel_length(tip_panel: float, half_aperture: float):
 
 
 A0, A1 = 0.6, 1.0  # plasma-electrode, extractor-electrode aperture half-widths
-PLATE_LENGTH = 10.0
-THICKNESS = 0.4
 GAP = 4.0  # plasma electrode to extractor
 X0, X1 = 0.0, GAP
 RESERVOIR_X = (-1.5, -0.3)  # ion source, pressed against the plasma-electrode aperture
@@ -173,6 +175,35 @@ class ExtractionSource:
     the macroparticle charge ``q``, the simulation's space-charge "knob") stay fixed and the
     system settles into a steady extracted beam instead of draining its own source.
     """
+
+    def _fresh(self, k: int) -> tuple[np.ndarray, np.ndarray]:
+        """``k`` freshly injected ions at the reservoir, with thermal spread and drift."""
+        x = self.rng.uniform(*RESERVOIR_X, k)
+        y = self.rng.uniform(-0.5 * A0, 0.5 * A0, k)
+        vx = self.rng.normal(V_DRIFT, V_THERMAL, k)
+        vy = self.rng.normal(0.0, V_THERMAL, k)
+        return np.vstack([x, y]), np.vstack([vx, vy])
+
+    def _accel(self, pos: np.ndarray) -> np.ndarray:
+        """Field from the electrodes (panel-only) plus from the other ions (tree walk)."""
+        self.electrodes.solve(pos, self.charge)
+        e_panel = (
+            direct_field(
+                pos,
+                self.electrodes.midpoints,
+                self.electrodes.charge,
+                kernel="log",
+                softening=SOFTENING,
+            )[1]
+            * self.electrodes.k_e
+        )
+        tree = FlatQuadtree(
+            pos, self.charge, self.root, kernel="log", leaf_capacity=self.leaf_capacity
+        )
+        e_tree = tree.evaluate(
+            pos, exclude=np.arange(pos.shape[1]), theta=self.theta, softening=SOFTENING
+        )[1]
+        return K_E * (e_panel + e_tree)
 
     def __init__(
         self,
@@ -215,35 +246,6 @@ class ExtractionSource:
         self.history_collected = [0]
         self.history_lost = [0]
         self._acc = self._accel(self.pos)
-
-    def _fresh(self, k: int) -> tuple[np.ndarray, np.ndarray]:
-        """``k`` freshly injected ions at the reservoir, with thermal spread and drift."""
-        x = self.rng.uniform(*RESERVOIR_X, k)
-        y = self.rng.uniform(-0.5 * A0, 0.5 * A0, k)
-        vx = self.rng.normal(V_DRIFT, V_THERMAL, k)
-        vy = self.rng.normal(0.0, V_THERMAL, k)
-        return np.vstack([x, y]), np.vstack([vx, vy])
-
-    def _accel(self, pos: np.ndarray) -> np.ndarray:
-        """Field from the electrodes (panel-only) plus from the other ions (tree walk)."""
-        self.electrodes.solve(pos, self.charge)
-        e_panel = (
-            direct_field(
-                pos,
-                self.electrodes.midpoints,
-                self.electrodes.charge,
-                kernel="log",
-                softening=SOFTENING,
-            )[1]
-            * self.electrodes.k_e
-        )
-        tree = FlatQuadtree(
-            pos, self.charge, self.root, kernel="log", leaf_capacity=self.leaf_capacity
-        )
-        e_tree = tree.evaluate(
-            pos, exclude=np.arange(pos.shape[1]), theta=self.theta, softening=SOFTENING
-        )[1]
-        return K_E * (e_panel + e_tree)
 
     def step(self) -> None:
         """Leapfrog: half-kick, drift, absorb/collect/recycle, half-kick."""

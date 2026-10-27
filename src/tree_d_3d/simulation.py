@@ -195,29 +195,6 @@ class ElectrostaticSimulation:
         self._fixed_fields_done = False
         self._tree = None
 
-    def _outside_walls(
-        self, start: np.ndarray | None = None
-    ) -> tuple[np.ndarray, np.ndarray]:
-        """Mask of absorbed particles, and the name of the deepest wall crossed or object entered.
-
-        With ``start`` (the positions before the drift) a particle also enters
-        an object when its step crosses the object's boundary. Walls take
-        precedence over objects.
-        """
-        n = self.num_particles
-        depth = np.zeros(n)
-        name = np.full(n, "", dtype=object)
-        for wall, axis, sign, value in self._walls:
-            beyond = sign * (self.positions[axis] - value)
-            deeper = beyond > depth
-            depth[deeper] = beyond[deeper]
-            name[deeper] = wall
-        if self._objects:
-            entered = self._entered_objects(start)
-            free = name == ""
-            name[free] = entered[free]
-        return name != "", name
-
     def _entered_objects(self, start: np.ndarray | None) -> np.ndarray:
         """The name of the object each particle entered first along its step ("": none).
 
@@ -298,6 +275,29 @@ class ElectrostaticSimulation:
         result = np.full(n, "", dtype=object)
         result[first >= 0] = np.asarray(names, dtype=object)[first[first >= 0]]
         return result
+
+    def _outside_walls(
+        self, start: np.ndarray | None = None
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Mask of absorbed particles, and the name of the deepest wall crossed or object entered.
+
+        With ``start`` (the positions before the drift) a particle also enters
+        an object when its step crosses the object's boundary. Walls take
+        precedence over objects.
+        """
+        n = self.num_particles
+        depth = np.zeros(n)
+        name = np.full(n, "", dtype=object)
+        for wall, axis, sign, value in self._walls:
+            beyond = sign * (self.positions[axis] - value)
+            deeper = beyond > depth
+            depth[deeper] = beyond[deeper]
+            name[deeper] = wall
+        if self._objects:
+            entered = self._entered_objects(start)
+            free = name == ""
+            name[free] = entered[free]
+        return name != "", name
 
     def __init__(
         self,

@@ -142,10 +142,6 @@ class GapField:
     plates: tuple[Rectangle, Rectangle]
     num_panels: int
 
-    def __call__(self, points: np.ndarray) -> np.ndarray:
-        """Bilinear field ``(2, N)`` at ``(2, N)`` points (clamped to the table)."""
-        return self.table(points)[1]
-
     @property
     def x(self) -> np.ndarray:
         return self.table.x
@@ -162,6 +158,10 @@ class GapField:
     @property
     def ey(self) -> np.ndarray:
         return self.table.field[1].T
+
+    def __call__(self, points: np.ndarray) -> np.ndarray:
+        """Bilinear field ``(2, N)`` at ``(2, N)`` points (clamped to the table)."""
+        return self.table(points)[1]
 
 
 def solve_gap_field(panel: float, nx: int, ny: int) -> GapField:
