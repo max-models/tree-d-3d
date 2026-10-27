@@ -8,7 +8,7 @@ written. See :mod:`tree_d_3d.kernels._metal`.
 from __future__ import annotations
 
 from tree_d_3d._types import Array
-from tree_d_3d.kernels._metal import make_kernel
+from tree_d_3d.kernels import KERNEL_PACKAGE
 
 _SOURCE = """
     uint node = thread_position_in_grid.x;
@@ -34,7 +34,7 @@ _SOURCE = """
     node_qabs[node] = qabs;
 """
 
-_KERNEL = make_kernel(
+_KERNEL = KERNEL_PACKAGE.metal_kernel(
     "tree_d_3d_log_quadtree_moments",
     _SOURCE,
     inputs=[

@@ -11,7 +11,8 @@ from __future__ import annotations
 import numpy as np
 
 from tree_d_3d._types import Array
-from tree_d_3d.kernels._metal import BH_HEADER, make_kernel, merge_status
+from tree_d_3d.kernels import KERNEL_PACKAGE
+from tree_d_3d.kernels._metal import BH_HEADER, merge_status
 
 _SOURCE = """
     uint i = thread_position_in_grid.x;
@@ -88,7 +89,7 @@ _SOURCE = """
     field[n_targets + i] = ey;
 """
 
-_KERNEL = make_kernel(
+_KERNEL = KERNEL_PACKAGE.metal_kernel(
     "tree_d_3d_evaluate_log_quadtree",
     _SOURCE,
     inputs=[

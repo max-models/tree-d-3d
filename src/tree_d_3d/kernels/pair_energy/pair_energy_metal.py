@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 
 from tree_d_3d._types import Array
-from tree_d_3d.kernels._metal import make_kernel
+from tree_d_3d.kernels import KERNEL_PACKAGE
 
 _SOURCE = """
     uint i = thread_position_in_grid.x;
@@ -35,7 +35,7 @@ _SOURCE = """
     partial[i] = ci * sum;
 """
 
-_KERNEL = make_kernel(
+_KERNEL = KERNEL_PACKAGE.metal_kernel(
     "tree_d_3d_pair_energy",
     _SOURCE,
     inputs=["pos", "charge", "softening"],

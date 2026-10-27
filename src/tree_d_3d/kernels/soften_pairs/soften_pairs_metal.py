@@ -2,7 +2,7 @@
 
 ``soften_pairs_pyccel.py`` next to this file is the CPU version with the same
 arguments. One thread per pair adds into zeroed atomic float32 delta arrays (see
-:mod:`tree_d_3d.kernels._metal_atomic`); the host adds those to ``phi`` and ``field`` in
+:meth:`~cunumpy.kernels.KernelPackage.metal_kernel` with ``atomic_outputs=True``); the host adds those to ``phi`` and ``field`` in
 float64. A pair at zero separation sets ``status[0]`` to its index + 1 (the first
 such pair; the other pairs are still applied).
 """
@@ -12,8 +12,8 @@ from __future__ import annotations
 import numpy as np
 
 from tree_d_3d._types import Array
+from tree_d_3d.kernels import KERNEL_PACKAGE
 from tree_d_3d.kernels._metal import merge_status
-from tree_d_3d.kernels._metal_atomic import make_atomic_kernel
 
 _SOURCE = """
     uint k = thread_position_in_grid.x;
@@ -40,11 +40,12 @@ _SOURCE = """
     atomic_fetch_add_explicit(&field_delta[n + j], -charge[i] * fy, memory_order_relaxed);
 """
 
-_KERNEL = make_atomic_kernel(
+_KERNEL = KERNEL_PACKAGE.metal_kernel(
     "tree_d_3d_soften_pairs",
     _SOURCE,
     inputs=["pos", "charge", "pairs", "params"],
     outputs=["phi_delta", "field_delta", "flags"],
+    atomic_outputs=True,
 )
 
 

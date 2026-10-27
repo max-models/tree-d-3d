@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from cunumpy.kernels import metal_available
 
 from tree_d_3d.kernels import KERNELS
-from tree_d_3d.kernels._metal import metal_available
 
 pytestmark = pytest.mark.skipif(
     not metal_available(), reason="MLX with a Metal GPU is not available"

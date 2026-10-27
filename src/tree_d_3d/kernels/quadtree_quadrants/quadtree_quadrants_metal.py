@@ -9,7 +9,7 @@ centre line can fall into the other quadrant than on the CPU.
 from __future__ import annotations
 
 from tree_d_3d._types import Array
-from tree_d_3d.kernels._metal import make_kernel
+from tree_d_3d.kernels import KERNEL_PACKAGE
 
 _SOURCE = """
     uint k = thread_position_in_grid.x;
@@ -25,7 +25,7 @@ _SOURCE = """
         + (pos[n + j] < node_center[2 * node + 1] ? 2 : 0);
 """
 
-_KERNEL = make_kernel(
+_KERNEL = KERNEL_PACKAGE.metal_kernel(
     "tree_d_3d_quadtree_quadrants",
     _SOURCE,
     inputs=["pos", "perm", "slot_node", "node_center", "node_child"],

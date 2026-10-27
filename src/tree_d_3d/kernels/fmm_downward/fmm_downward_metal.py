@@ -12,7 +12,7 @@ from __future__ import annotations
 import numpy as np
 
 from tree_d_3d._types import Array
-from tree_d_3d.kernels._metal import make_kernel
+from tree_d_3d.kernels import KERNEL_PACKAGE
 
 _HEADER = "#define TREE_D_3D_MAX_ORDER 64\n"
 
@@ -50,7 +50,7 @@ _SOURCE = """
     }
 """
 
-_KERNEL = make_kernel(
+_KERNEL = KERNEL_PACKAGE.metal_kernel(
     "tree_d_3d_fmm_downward",
     _SOURCE,
     inputs=["range", "node_center", "node_child", "binomial", "local_re", "local_im"],

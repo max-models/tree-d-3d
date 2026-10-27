@@ -8,7 +8,7 @@ arguments. One thread per node, each summing its own particles; only the first
 from __future__ import annotations
 
 from tree_d_3d._types import Array
-from tree_d_3d.kernels._metal import make_kernel
+from tree_d_3d.kernels import KERNEL_PACKAGE
 
 _SOURCE = """
     uint node = thread_position_in_grid.x;
@@ -37,7 +37,7 @@ _SOURCE = """
     node_s[3 * node + 2] = syy;
 """
 
-_KERNEL = make_kernel(
+_KERNEL = KERNEL_PACKAGE.metal_kernel(
     "tree_d_3d_quadtree_moments",
     _SOURCE,
     inputs=["pos", "charge", "perm", "node_center", "node_start", "node_end"],

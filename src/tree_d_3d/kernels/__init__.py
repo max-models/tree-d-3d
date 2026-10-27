@@ -2,7 +2,7 @@
 
 Every kernel ``<name>`` lives in its own folder::
 
-    tree_d_3d/kernels/<name>/__init__.py        kernel = xp.kernels.Kernel.from_folder(...)
+    tree_d_3d/kernels/<name>/__init__.py        kernel = KERNEL_PACKAGE.from_folder(__name__)
     tree_d_3d/kernels/<name>/<name>_pyccel.py   CPU, compiled with Pyccel on first use
     tree_d_3d/kernels/<name>/<name>_numpy.py    CPU, when Pyccel is unavailable
     tree_d_3d/kernels/<name>/<name>_cuda.cu     GPU (CuPy), compiled with NVRTC
@@ -22,8 +22,11 @@ from types import SimpleNamespace
 from typing import Any
 
 import cunumpy as xp
+from cunumpy.kernels import metal_available
 
-from tree_d_3d.kernels._metal import metal_available
+#: The build cache and launch options of every kernel folder (``TREE_D_3D_KERNEL_CACHE``,
+#: ``TREE_D_3D_OPENMP``); see :class:`cunumpy.kernels.KernelPackage`.
+KERNEL_PACKAGE = xp.kernels.KernelPackage("tree-d-3d")
 
 #: The kernels, by name; each has a folder ``tree_d_3d.kernels.<name>``.
 KERNEL_NAMES = (

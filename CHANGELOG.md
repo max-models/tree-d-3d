@@ -5,6 +5,13 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- The kernels are built with cunumpy's `KernelPackage` (`tree_d_3d.kernels.KERNEL_PACKAGE`):
+  `kernels/_build.py`, `kernels/compile.py` and `kernels/_metal_atomic.py` are gone, and
+  `kernels/_metal.py` keeps only the tree helpers (`BH_HEADER`, `merge_status`). The build
+  cache is still `TREE_D_3D_KERNEL_CACHE`; `metal_available` is cunumpy's.
+
 ### Added
 
 - Opt-in scope-profiler regions (`tree_d_3d.<module>.<operation>`) around the tree build,
