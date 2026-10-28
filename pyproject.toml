@@ -54,6 +54,9 @@ optional-dependencies.metal = [ "mlx; sys_platform == 'darwin' and platform_mach
 optional-dependencies.test = [ "pytest", "pytest-cov", "tree-d-3d[examples]" ]
 urls."Source" = "https://github.com/max-models/tree-d-3d"
 
+[project.entry-points."scope_profiler.opt_in_tags"]
+tree_d_3d = "tree_d_3d"
+
 [tool.setuptools.packages.find]
 where = [ "src" ]
 

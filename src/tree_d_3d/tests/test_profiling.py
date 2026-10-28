@@ -44,3 +44,17 @@ def test_regions_off_by_default(profiler):
 @pytest.mark.parametrize("tag", [PROFILE_TAG, "*"])
 def test_regions_recorded_when_enabled(profiler, tag):
     assert recorded_regions(enable_tags=[tag]) >= TREE_REGIONS
+
+
+def test_the_opt_in_tag_has_an_entry_point():
+    """``scope-profiler tags`` finds the tag through the package's entry point."""
+    from importlib.metadata import entry_points
+
+    from tree_d_3d._profiling import _PROFILE_TAGS
+
+    found = {
+        entry_point.name: entry_point.value
+        for entry_point in entry_points(group="scope_profiler.opt_in_tags")
+    }
+    assert found.get("tree_d_3d") == "tree_d_3d"
+    assert "tree_d_3d" in _PROFILE_TAGS
