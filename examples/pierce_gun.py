@@ -1,4 +1,6 @@
-"""A planar Pierce electron gun: a space-charge-limited sheet beam kept parallel.
+"""Pierce gun.
+
+A planar Pierce electron gun keeps a space-charge-limited sheet beam parallel.
 
 In a planar diode the space-charge-limited current density is the Child-Langmuir
 ``J_CL = (4 / 9) eps0 sqrt(2 q / m) V^(3/2) / d^2``, with the potential

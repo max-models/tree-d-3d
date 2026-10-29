@@ -1,4 +1,6 @@
-"""A slit (2D) einzel lens: both polarities focus, the decelerating one much more strongly.
+"""Einzel lens.
+
+A slit (2D) einzel lens, where both polarities focus but the decelerating one much more strongly.
 
 A practical use of :class:`tree_d_3d.BoundaryIntegralElectrodes`, as opposed to
 ``examples/boundary_integral_electrodes.py``'s closed-form validation cases: three slit

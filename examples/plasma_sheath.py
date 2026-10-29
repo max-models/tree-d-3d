@@ -1,4 +1,6 @@
-"""A plasma sheath between two grounded (Dirichlet) walls.
+"""Plasma sheath.
+
+A plasma sheath between two grounded (Dirichlet) walls.
 
 Runs a two-species (electron/ion) particle simulation confined in the strip
 ``0 < x < L`` between two grounded conducting plates, using ``GroundedStripField``:

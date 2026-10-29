@@ -1,4 +1,6 @@
-"""An ion-mobility drift tube: drift velocity, diffusion and resolving power.
+"""Drift tube mobility.
+
+An ion-mobility drift tube, with its drift velocity, diffusion and resolving power.
 
 Ion-mobility spectrometry separates ions by how fast they drift through a buffer gas in
 a weak field: in the low-field limit the drift velocity is ``v_d = K E`` with a mobility

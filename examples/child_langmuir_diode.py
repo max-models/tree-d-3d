@@ -1,4 +1,6 @@
-"""Space-charge-limited emission in a gridless code: the planar Child-Langmuir diode.
+"""Child-Langmuir diode.
+
+Space-charge-limited emission in a gridless code, shown on the planar Child-Langmuir diode.
 
 A beam source emits at the space-charge limit when the normal field at the emitter is
 zero. In a mesh code that condition is imposed through the cell next to the emitter; in

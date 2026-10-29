@@ -1,4 +1,6 @@
-"""Boltzmann electrons on the quadtree: the tree leaves as the quadrature of a nonlinear source.
+"""Boltzmann electrons.
+
+Boltzmann electrons on the quadtree, with the tree leaves as the quadrature of a nonlinear source.
 
 A gridless ion code has no mesh to put a fluid electron model on. The quadtree leaves are
 an adaptive partition of the plane, so put the Boltzmann electron charge of each leaf,

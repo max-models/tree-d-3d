@@ -1,4 +1,6 @@
-"""Conductors at prescribed potentials, by the boundary-integral (panel) method.
+"""Boundary-integral electrodes.
+
+Conductors at prescribed potentials, solved by the boundary-integral (panel) method.
 
 A particle code with electrodes needs conductors held at prescribed potentials, not just
 grounded absorbing walls or the two infinite grounded plates of

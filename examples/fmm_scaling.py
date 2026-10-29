@@ -1,4 +1,6 @@
-"""The fast multipole method: O(N) fields of line charges.
+"""Fast multipole method.
+
+The fast multipole method computes the fields of line charges in O(N).
 
 Runs the experiments behind ``FlatQuadtree.fmm``, the library's O(N) fast multipole
 method for ``kernel="log"``, and saves one figure per claim:

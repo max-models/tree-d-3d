@@ -1,4 +1,6 @@
-"""Parameter studies behind the conserving tree code, as figures.
+"""Conserving tree studies.
+
+The parameter studies behind the conserving tree code, as figures.
 
 Companion of ``conserving_tree_code.py``; each figure answers one question:
 
