@@ -6,7 +6,7 @@ EXAMPLES = $(PYTHON) docs/tools/examples.py
 DOCS_ENV = DOCS_PYTHON=$(shell $(PYTHON) -c "import sys; print(sys.executable)")
 FORCE ?=
 
-.PHONY: help install test lint readme readme-check docs-install docs-notebooks docs-examples docs-dev docs-build docs-preview docs-clean
+.PHONY: help install test lint readme readme-check docs-install docs-notebooks docs-examples docs-hero docs-dev docs-build docs-preview docs-clean
 
 help:  ## list the targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-16s %s\n", $$1, $$2}'
@@ -42,6 +42,9 @@ docs-notebooks:  ## execute the changed tutorials and convert all of them (FORCE
 docs-examples:  ## run the changed examples (--quick) and convert all of them (FORCE=1 reruns all)
 	$(EXAMPLES) run $(if $(FORCE),--force,) $(if $(JOBS),--jobs $(JOBS),)
 	$(EXAMPLES) convert
+
+docs-hero:  ## redraw the home page figure (docs/src/assets/hero.svg)
+	$(PYTHON) docs/hero.py
 
 docs-dev:  ## live preview at http://localhost:4321/tree-d-3d/
 	$(NOTEBOOKS) convert
