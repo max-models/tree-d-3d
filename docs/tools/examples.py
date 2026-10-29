@@ -12,8 +12,8 @@ static fallback) and ``<name>.html`` (a standalone copy, not used by the docs).
     spread them over several machines (the weights are in ``example_weights.json``);
     ``--dry-run`` prints the plan.
 ``convert``
-    Writes ``docs/src/content/docs/examples/<slug>.mdx`` from the figures of a run, copying their
-    ``.plotly.json`` into ``docs/public/examples/<slug>/``. Captions and the intro text come from
+    Writes ``docs/src/content/docs/example-scripts/<slug>.mdx`` from the figures of a run, copying their
+    ``.plotly.json`` into ``docs/public/example-scripts/<slug>/``. Captions and the intro text come from
     the script's module docstring. A script that has not been run is skipped (``--strict`` fails
     on it).
 ``clean``
@@ -42,8 +42,9 @@ DOCS = Path(__file__).resolve().parents[1]
 REPO = DOCS.parent
 EXAMPLES = REPO / "examples"
 CACHE = DOCS / ".cache" / "examples"
-CONTENT = DOCS / "src" / "content" / "docs" / "examples"
-PUBLIC = DOCS / "public" / "examples"
+# the "Scripts" group of the Examples section, next to the notebook pages in examples/
+CONTENT = DOCS / "src" / "content" / "docs" / "example-scripts"
+PUBLIC = DOCS / "public" / "example-scripts"
 COMPONENTS = "../../../components"
 
 
@@ -356,7 +357,7 @@ def convert_example(script: Path, order: int) -> list[str]:
         # JSX has no backslash-escape for a quote inside one -- unlike the JSON string
         # ``_yaml_string`` returns, which doubles as a valid JS string literal inside ``{...}``.
         title = _yaml_string(caption or name)
-        tag = f'<PlotlyChart src="/examples/{slug}/{name}.plotly.json" title={{{title}}} />'
+        tag = f'<PlotlyChart src="/example-scripts/{slug}/{name}.plotly.json" title={{{title}}} />'
         return f"{tag}\n\n*{caption}*" if caption else tag
 
     if animations:

@@ -1,13 +1,15 @@
 ---
 title: Examples
-description: Runnable scripts in examples/, with their figures and animations.
+description: Notebooks executed and published with their outputs, and runnable scripts with their figures.
 sidebar:
   order: 0
 ---
 
-Every script in `examples/` is run when the site is built, and its figures and animations are
-published here. Each one is a single file: download it from its page and run it with
-`python examples/<name>.py` (add `--quick` for a faster, smaller run).
+Every notebook in `tutorials/` is executed when the site is built and published here with its
+outputs. Download a notebook from its page to run the steps yourself.
 
-See [Building the docs](/tree-d-3d/development/docs/) for how the figures are generated and
-captioned from the script's own docstring.
+The [Scripts](/tree-d-3d/example-scripts/) are complete simulations: each runs a script from
+`examples/` and shows its figures and animations.
+
+See [Building the docs](/tree-d-3d/development/docs/) for the cell tags that control what
+is shown.
