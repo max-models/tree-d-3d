@@ -1,4 +1,6 @@
-"""A tree code that conserves both momentum and energy: the evidence, as figures.
+"""Conserving tree code.
+
+A tree code that conserves both momentum and energy, with the evidence as figures.
 
 Runs the experiments behind ``tree_d_3d.smooth`` and saves one figure per claim:
 

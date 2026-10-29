@@ -1,4 +1,6 @@
-"""Rational far fields: equivalent charges with free poles against the multipole series.
+"""Rational far fields.
+
+Rational far fields compare equivalent charges with free poles against the multipole series.
 
 The multipole (Taylor) far field of a cell converges like ``rho**p`` with ``rho`` the
 cell's half-diagonal over the target distance, which is why a fast multipole method

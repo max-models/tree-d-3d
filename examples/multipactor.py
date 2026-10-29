@@ -1,4 +1,6 @@
-"""Two-surface multipactor between parallel plates, with surface impacts from simgeometry.
+"""Multipactor.
+
+Two-surface multipactor between parallel plates, with surface impacts from simgeometry.
 
 Multipactor is a resonant electron avalanche in vacuum RF devices (cavities, couplers,
 waveguide windows, gaps between accelerator grids): an electron emitted from one wall is

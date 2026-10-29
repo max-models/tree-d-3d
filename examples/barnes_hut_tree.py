@@ -1,4 +1,6 @@
-"""The Barnes-Hut tree: how a quadtree approximates distant charges.
+"""Barnes-Hut tree.
+
+The Barnes-Hut tree, and how a quadtree approximates distant charges.
 
 Runs the experiments behind ``FlatQuadtree.evaluate``, the library's Barnes-Hut tree
 walk for point and line charges, and saves one figure per claim:

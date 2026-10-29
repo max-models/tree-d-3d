@@ -1,4 +1,6 @@
-"""Charge-exchange ions in an ion-thruster grid set: where they land and what they erode.
+"""Grid erosion.
+
+Charge-exchange ions in an ion-thruster grid set: where they land and what they erode.
 
 A gridded ion thruster accelerates xenon ions through a stack of slit electrodes, and the
 grids wear out from the inside: unionised propellant leaks through the apertures, a fast

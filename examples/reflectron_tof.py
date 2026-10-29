@@ -1,4 +1,6 @@
-"""A gridless reflectron time-of-flight mass spectrometer, and its energy focusing.
+"""Reflectron mass spectrometer.
+
+A gridless reflectron time-of-flight mass spectrometer, and its energy focusing.
 
 A time-of-flight mass spectrometer accelerates ions to (nearly) the same energy ``U`` and
 times their flight: at fixed charge the time scales as ``sqrt(m)``, so the arrival time

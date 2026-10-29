@@ -74,7 +74,7 @@ def rst_to_md(text: str) -> str:
 def parse_docstring(doc: str) -> dict:
     """Return title, intro/notes markdown, the usage line and the ordered figure captions."""
     paragraphs = re.split(r"\n\s*\n", doc.strip("\n"))
-    title = flatten(paragraphs[0])
+    title = flatten(paragraphs[0]).rstrip(".")
     figures: list[tuple[str, str]] = []
     intro: list[str] = []
     notes: list[str] = []

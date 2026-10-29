@@ -1,4 +1,6 @@
-"""Ion extraction through an aperture, by the tree code plus boundary-integral electrodes.
+"""Ion extraction.
+
+Ion extraction through an aperture, by the tree code plus boundary-integral electrodes.
 
 A two-slit extraction system, the 2D analogue of the plasma/extractor electrode pair used
 to pull an ion beam out of a plasma source (as in ``picnic``'s electrode setups): a grounded

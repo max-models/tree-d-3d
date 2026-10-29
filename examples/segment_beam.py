@@ -1,4 +1,6 @@
-"""Steady-state space-charge optics without a mesh: trajectories as line charges.
+"""Mesh-free beam optics.
+
+Steady-state space-charge optics without a mesh, with trajectories as line charges.
 
 A steady beam is a bundle of trajectories; the trajectory carrying the current ``dI``
 (per unit depth, in 2D) at speed ``v`` is a curve of line charge ``dI / v`` per unit

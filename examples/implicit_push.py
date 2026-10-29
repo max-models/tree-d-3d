@@ -1,4 +1,6 @@
-"""An implicit, exactly energy-conserving push for N-body plasma: what it costs.
+"""Implicit push.
+
+An implicit, exactly energy-conserving push for N-body plasma, and what it costs.
 
 Explicit integrators must resolve the plasma oscillation (``dt * omega_pe`` below about
 one). An implicit midpoint step can take longer steps; with Gonzalez's discrete gradient
