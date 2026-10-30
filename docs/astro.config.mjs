@@ -10,7 +10,6 @@ export default defineDocs({
 	pythonPackage: 'tree_d_3d',
 	nav: [
 		{ label: 'Getting started', link: '/getting-started/installation/' },
-		{ label: 'Tutorials', link: '/tutorials/' },
 		{ label: 'Examples', link: '/examples/' },
 		{ label: 'Development', link: '/development/docs/' },
 		{ label: 'API', link: '/api/tree_d_3d/' },
@@ -24,12 +23,11 @@ export default defineDocs({
 			],
 		},
 		{
-			label: 'Tutorials',
-			items: [{ autogenerate: { directory: 'tutorials' } }],
-		},
-		{
 			label: 'Examples',
-			items: [{ autogenerate: { directory: 'examples' } }],
+			items: [
+				{ autogenerate: { directory: 'examples' } },
+				{ label: 'Scripts', items: [{ autogenerate: { directory: 'example-scripts' } }] },
+			],
 		},
 		{
 			label: 'Development',

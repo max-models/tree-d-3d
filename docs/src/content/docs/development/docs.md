@@ -7,9 +7,11 @@ The site in `docs/` is built with [Astro](https://astro.build/) and
 [Starlight](https://starlight.astro.build/). It has four kinds of pages:
 
 - **Hand-written pages** in `docs/src/content/docs/`, as Markdown or MDX.
-- **Tutorials**, converted from the Jupyter notebooks in `tutorials/` by `starlight-notebooks`.
-  Each notebook is executed and its outputs (text, images, tables) are written into an MDX page.
-- **Examples**, converted from the scripts in `examples/` by `docs/tools/examples.py`. Each script
+- **Examples**, converted from the Jupyter notebooks in `tutorials/` by `starlight-notebooks`
+  (the `section` setting in `docs/package.json` publishes them under `examples/`). Each
+  notebook is executed and its outputs (text, images, tables) are written into an MDX page.
+- **Example scripts**, a "Scripts" group of the Examples (`example-scripts/`), converted from
+  the scripts in `examples/` by `docs/tools/examples.py`. Each script
   is run and its figures are published as interactive Plotly charts, with captions taken from its
   own docstring. The scripts run in parallel (`--jobs N`, by default one per core, `make docs-examples JOBS=N`
   here), and in CI in four shards on four machines (`run --shard I/N`, balanced by the estimated
@@ -17,6 +19,9 @@ The site in `docs/` is built with [Astro](https://astro.build/) and
   measured times at the end).
 - **API reference**, generated from the docstrings by
   [starlight-pydocs](https://ewels.github.io/starlight-pydocs/), one page per module.
+
+Guides, when a project has them, are hand-written pages that explain the model or a concept;
+anything runnable belongs in the Examples.
 
 The configuration (`defineDocs` in `docs/astro.config.mjs`), the look, the header, the notebook
 tool and the build workflow come from the shared
@@ -46,7 +51,7 @@ make docs-clean       # remove generated pages and build output
 `make docs-examples` only reruns a script whose source changed since its last run; pass `FORCE=1`
 to rerun all of them.
 
-## Writing an example
+## Writing an example script
 
 Add a script to `examples/`. Draw each figure with Plotly (`plotly.graph_objects`) and save it
 with `plasma_plots.save_figure(fig, output / name)`, which writes `<name>.plotly.json` (embedded
@@ -61,7 +66,7 @@ figures, in that order, `name` matching the stem passed to `save_figure`. The sc
 `--output DIR` and write its figures there, and should accept `--quick` to run a smaller, faster
 version for the docs build.
 
-## Writing tutorials
+## Writing an example notebook
 
 Put a notebook in `tutorials/`. Its first `# Heading` becomes the page title and the first
 paragraph its description. Cell tags control the output:
