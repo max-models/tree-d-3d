@@ -9,7 +9,6 @@ version = "0.1.0"
 description = "Barnes-Hut trees and fast multipole methods for charged particles in a plane, on NumPy, CuPy or Metal."
 readme = "README.md"
 keywords = [ "barnes-hut", "cupy", "electrostatics", "fast multipole method", "fmm", "n-body", "plasma", "pyccel", "quadtree" ]
-license = { file = "LICENSE.txt" }
 authors = [ { name = "Max" } ]
 requires-python = ">=3.10"
 classifiers = [
