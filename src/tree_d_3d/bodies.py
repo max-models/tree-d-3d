@@ -3,10 +3,20 @@
 from __future__ import annotations
 
 import numpy as np
+from methodcard import method
 
 from tree_d_3d._utils import _finite
 
 
+@method(
+    equations={
+        "weight": r"m = w\, m_1, \qquad q = w\, q_1, \qquad \frac{q}{m} = \frac{q_1}{m_1}",
+    },
+    assumptions=(
+        r"$m_1$, $q_1$ per physical particle; a macroparticle of weight $w > 0$ keeps the charge-to-mass ratio",
+        r"a fixed source has zero velocity and never moves",
+    ),
+)
 class ChargedBody:
     """A physical particle or weighted macroparticle in consistent units.
 

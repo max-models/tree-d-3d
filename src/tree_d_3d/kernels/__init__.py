@@ -25,7 +25,7 @@ import cunumpy as xp
 from cunumpy.kernels import metal_available
 
 #: The build cache and launch options of every kernel folder (``TREE_D_3D_KERNEL_CACHE``,
-#: ``TREE_D_3D_OPENMP``); see :class:`cunumpy.kernels.KernelPackage`.
+#: ``TREE_D_3D_OPENMP``); see `cunumpy.kernels.KernelPackage`.
 KERNEL_PACKAGE = xp.kernels.KernelPackage("tree-d-3d")
 
 #: The kernels, by name; each has a folder ``tree_d_3d.kernels.<name>``.
@@ -70,7 +70,7 @@ def _kernel_objects() -> dict[str, Any]:
 
 
 def __getattr__(name: str) -> Any:
-    """``KERNELS``: every kernel as a :class:`cunumpy.kernels.KernelCatalog`, loaded on first use."""
+    """``KERNELS``: every kernel as a `cunumpy.kernels.KernelCatalog`, loaded on first use."""
     if name == "KERNELS":
         catalog = xp.kernels.KernelCatalog(_kernel_objects())
         globals()["KERNELS"] = catalog

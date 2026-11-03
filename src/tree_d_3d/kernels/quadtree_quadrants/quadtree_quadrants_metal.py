@@ -1,7 +1,7 @@
 """The Metal version (Apple-silicon GPU, float32) of the ``quadtree_quadrants`` kernel.
 
 ``quadtree_quadrants_pyccel.py`` next to this file is the CPU version with the same
-arguments. One thread per sorted slot; see :mod:`tree_d_3d.kernels._metal`. ``pos`` is
+arguments. One thread per sorted slot; see `tree_d_3d.kernels._metal`. ``pos`` is
 ``(2, N)`` (component-major). Positions are compared with the node centres in float32, so a particle within about 1e-7 of a
 centre line can fall into the other quadrant than on the CPU.
 """

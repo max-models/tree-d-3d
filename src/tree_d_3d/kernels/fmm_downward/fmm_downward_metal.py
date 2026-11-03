@@ -4,7 +4,7 @@
 arguments. One thread per node of ``first_node:last_node``; a child has one parent, so
 each thread writes its own children's rows of a zeroed delta (no atomics), which the
 host adds to the local expansions in float64. The ``power_re`` and ``power_im``
-scratch arguments of the CPU version are unused. See :mod:`tree_d_3d.kernels._metal`.
+scratch arguments of the CPU version are unused. See `tree_d_3d.kernels._metal`.
 """
 
 from __future__ import annotations

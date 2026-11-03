@@ -2,8 +2,8 @@
 
 ``evaluate_log_quadtree_cuda.cu`` next to this file is the CUDA version (GPU) and ``evaluate_log_quadtree_numpy.py`` the
 version for machines without Pyccel, all with the same arguments; the folder's
-``__init__.py`` declares the kernel (see :mod:`tree_d_3d.kernels`). The flat
-quadtree is described in :mod:`tree_d_3d.flat_tree`.
+``__init__.py`` declares the kernel (see `tree_d_3d.kernels`). The flat
+quadtree is described in `tree_d_3d.flat_tree`.
 """
 
 # ruff: noqa: F821 -- "int64[:]" annotations are Pyccel types, not Python names.
@@ -37,7 +37,7 @@ def evaluate_log_quadtree(
 ) -> None:
     """Line-charge potential and field at targets, without k_e.
 
-    Same traversal and opening rule as :func:`evaluate_quadtree`. Accepted
+    Same traversal and opening rule as `evaluate_quadtree`. Accepted
     cells use the order-p expansion, unsoftened: for a target at z,
     ``sum q/(z - z_j) = sum_n a_n w**(n+1)`` and
     ``sum q ln(z - z_j) = a_0 ln(z - c) - sum_{n>=1} a_n w**n / n`` with

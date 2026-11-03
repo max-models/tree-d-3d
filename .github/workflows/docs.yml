@@ -86,5 +86,8 @@ jobs:
         examples/fields-and-simulation/index.html
         example-scripts/index.html
         example-scripts/conserving-tree-code/index.html
+        numerics/index.html
+        numerics/flat-tree/index.html
+        numerics/electrodes/index.html
         api/tree_d_3d/index.html
         api/tree_d_3d/simulation/index.html

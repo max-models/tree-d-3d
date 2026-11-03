@@ -2,7 +2,7 @@
 
 ``quadtree_scatter_pyccel.py`` next to this file is the CPU version with the same
 arguments. One thread per sorted slot, each writing its own target slot (the targets
-are a permutation); integer only, so exact. See :mod:`tree_d_3d.kernels._metal`.
+are a permutation); integer only, so exact. See `tree_d_3d.kernels._metal`.
 """
 
 from __future__ import annotations

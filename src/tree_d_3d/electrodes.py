@@ -2,29 +2,30 @@
 
 A conductor's surface carries an induced line-charge density whose potential, added to
 the free charges' potential, makes the conductor an equipotential: the single-layer
-formulation of :mod:`tree_d_3d`'s research note "10 Boundary-integral electrodes"
+formulation of `tree_d_3d`'s research note "10 Boundary-integral electrodes"
 (``obsidian-notes/notes/tree-plasma-ideas``). Discretising a conductor into straight
 panels and collocating at panel midpoints turns this into a small dense linear system
 ``S Q = g``: ``S`` couples panel charges to panel potentials, a panel's own column uses
 the closed-form potential of a uniformly charged straight segment at its own midpoint
 (finite, unlike a point charge's self-potential). A panel close to its target -- within
 ``near_field`` of its own lengths, another panel's midpoint or a probe point -- also
-enters with that exact segment potential and field (:func:`segment_field`); farther
-panels are point line charges at their midpoints, the usual flat-panel approximation,
-whose error falls as ``(L / r)**2`` and is summed fast by :func:`tree_d_3d.direct_field`.
-Without the near-field correction the potential between collocation points is off by
+enters with that exact segment potential and field (`segment_field`); farther
+panels are ``far_points`` (2) Gauss--Legendre point line charges each, whose error falls
+as ``(L / r)**(2 far_points)``, summed fast by `tree_d_3d.direct_field`; one point at
+the midpoint (``far_points=1``) is the usual flat-panel approximation, with error
+``(L / r)**2``. Without the near-field correction the potential between collocation points is off by
 about a tenth of the source scale next to a panel and the method converges at first
 order; with it the boundary is an equipotential to within the piecewise-constant charge
 density's own error.
 
 Panel counts here are the hundreds to low thousands the validation examples need, so the
 system is solved directly, by an LU factorisation done once per geometry and reused by
-every :meth:`BoundaryIntegralElectrodes.solve`; the note's plan of an FMM-accelerated
+every `BoundaryIntegralElectrodes.solve`; the note's plan of an FMM-accelerated
 GMRES solve, needed once panel and particle counts both grow large, is not implemented.
 
-The log kernel is the one :class:`tree_d_3d.FlatQuadtree` and :func:`tree_d_3d.direct_field`
+The log kernel is the one `tree_d_3d.FlatQuadtree` and `tree_d_3d.direct_field`
 use with ``kernel="log"``: potential ``-2 q ln r`` and field ``2 q d / r**2`` per unit
-charge, without ``k_e`` (applied here, as in :class:`tree_d_3d.GroundedStripField`).
+charge, without ``k_e`` (applied here, as in `tree_d_3d.GroundedStripField`).
 """
 
 from __future__ import annotations
@@ -35,6 +36,7 @@ from typing import Protocol
 
 import numpy as np
 import scope_profiler as sp
+from methodcard import ConvergenceProblem, Rule, method
 from scipy.linalg import lu_factor, lu_solve
 from scipy.spatial import KDTree
 
@@ -48,12 +50,54 @@ NEAR_FIELD: float = 4.0
 FAR_POINTS: int = 2
 
 
+def _segment_rules() -> dict:
+    """The SymPy rules of `segment_field`: the kernel integrated along the segment.
+
+    For the tests. The segment runs from the origin along x; SymPy integrates
+    ``-ln((u - s)^2 + v^2) / L`` over ``0 < s < L`` (``v > 0``), and the field is minus
+    the gradient of the result.
+    """
+    import sympy
+
+    u, v, length, s = sympy.symbols("u v length s", positive=True)
+    phi = -sympy.integrate(sympy.log((u - s) ** 2 + v**2), (s, 0, length)) / length
+    ranges = {"u": (-1.0, 2.0), "v": (0.05, 1.0), "length": (0.2, 1.5)}
+
+    def component(index: int):
+        def call(u, v, length):
+            phi, field = segment_field(
+                np.array([[u], [v]]), np.zeros((2, 1)), np.array([[length], [0.0]])
+            )
+            return float(phi[0]) if index < 0 else float(field[index, 0])
+
+        return call
+
+    return {
+        "potential": Rule(phi, component(-1), ranges),
+        "field_along": Rule(-sympy.diff(phi, u), component(0), ranges),
+        "field_across": Rule(-sympy.diff(phi, v), component(1), ranges),
+    }
+
+
+@method(
+    equations={
+        "potential": r"\phi_\mathrm{seg} = -\frac{2}{L}\int_0^L \ln\sqrt{(u - s)^2 + v^2}\, ds = -\frac{2}{L}\Big[u\ln r_a - (u - L)\ln r_b - L + |v|\vartheta\Big]",
+        "field_along": r"\mathbf E_\mathrm{seg}\cdot\hat{\mathbf t} = \frac{2}{L}\ln\frac{r_a}{r_b}",
+        "field_across": r"\mathbf E_\mathrm{seg}\cdot\hat{\mathbf n} = \frac{2}{L}\operatorname{sign}(v)\,\vartheta, \qquad \vartheta = \operatorname{atan2}(u, |v|) - \operatorname{atan2}(u - L, |v|)",
+    },
+    assumptions=(
+        r"unit total charge spread evenly along a straight segment of length $L$, in the log kernel, without $k_e$",
+        r"$u$, $v$ the target's coordinates along and across the segment from its start; $r_a$, $r_b$ the distances to its ends; $\hat{\mathbf n} = (-t_y, t_x)$",
+        r"on the segment the normal field (the jump of the surface charge) is taken as zero; at an end the potential is finite and the field diverges logarithmically",
+    ),
+    symbolic=_segment_rules,
+)
 def segment_field(points, start, end) -> tuple[np.ndarray, np.ndarray]:
     """Potential ``(K,)`` and field ``(2, K)`` of uniformly charged straight segments.
 
     Pairs column by column: ``points``, ``start`` and ``end`` are ``(2, K)``, and segment
     ``k`` from ``start[:, k]`` to ``end[:, k]`` carries unit total charge spread evenly
-    along it, in the log kernel of :func:`tree_d_3d.direct_field` (a point charge ``q``
+    along it, in the log kernel of `tree_d_3d.direct_field` (a point charge ``q``
     has potential ``-2 q ln r``), without ``k_e``. With ``u`` and ``v`` the target's
     coordinates along and across the segment of length ``L`` from its start,
 
@@ -100,15 +144,51 @@ def _point_field(points, sources) -> tuple[np.ndarray, np.ndarray]:
     return -np.log(r2), 2.0 * d / r2
 
 
+def _table_problem() -> ConvergenceProblem:
+    """Bilinear interpolation of a smooth potential and field against the grid spacing."""
+    rng = np.random.default_rng(3)
+    points = rng.uniform(0.0, 1.0, (2, 200))
+
+    def sample(x, y):
+        return np.sin(3.0 * x) * np.cos(2.0 * y), np.stack(
+            (np.cos(2.0 * x + y), np.sin(x - y))
+        )
+
+    exact_phi, exact_field = sample(*points)
+
+    def error(spacing: float) -> dict[str, float]:
+        x = np.linspace(0.0, 1.0, round(1.0 / spacing) + 1)
+        phi, field = sample(*np.meshgrid(x, x, indexing="ij"))
+        phi, field = TabulatedField(x, x, phi, field)(points)
+        return {
+            "potential": float(np.max(np.abs(phi - exact_phi))),
+            "field": float(np.max(np.abs(field - exact_field))),
+        }
+
+    return ConvergenceProblem(error, steps=[1 / 10, 1 / 20, 1 / 40, 1 / 80])
+
+
+@method(
+    equations={
+        "bilinear": r"f(x, y) = (1 - f_x)(1 - f_y)\, f_{i,j} + f_x (1 - f_y)\, f_{i+1,j} + (1 - f_x) f_y\, f_{i,j+1} + f_x f_y\, f_{i+1,j+1}",
+        "cell": r"f_x = \frac{x - x_0}{\Delta x} - i \in [0, 1], \qquad i = \min\!\left(\left\lfloor \frac{x - x_0}{\Delta x} \right\rfloor, n_x - 2\right)",
+    },
+    order={"potential": 2, "field": 2},
+    assumptions=(
+        r"a regular grid; potential and field interpolated separately, so $\mathbf E = -\nabla\phi$ holds only to the interpolation error",
+        r"points outside the grid take the value at the nearest edge",
+    ),
+    problem=_table_problem,
+)
 @dataclass(frozen=True)
 class TabulatedField:
     """Potential and field sampled on a regular grid, interpolated bilinearly.
 
     ``x`` ``(nx,)`` and ``y`` ``(ny,)`` are the grid lines, ``potential`` ``(nx, ny)``
-    and ``field`` ``(2, nx, ny)`` the samples, as :meth:`BoundaryIntegralElectrodes.tabulate`
+    and ``field`` ``(2, nx, ny)`` the samples, as `BoundaryIntegralElectrodes.tabulate`
     makes them. Calling it with ``(2, M)`` points returns the interpolated potential
     ``(M,)`` and field ``(2, M)``; points outside the grid take the value at the
-    nearest edge (see :meth:`contains`).
+    nearest edge (see `contains`).
     """
 
     x: np.ndarray
@@ -152,7 +232,7 @@ class TabulatedField:
 
 
 class OutlinedShape(Protocol):
-    """A 2D shape with boundary loops, such as any 2D :mod:`simgeometry` shape."""
+    """A 2D shape with boundary loops, such as any 2D `simgeometry` shape."""
 
     def outlines(self, max_spacing=None) -> list[np.ndarray]: ...
 
@@ -175,9 +255,9 @@ def conductors_from_shape(
     potential: float,
     max_panel_length: float | Callable[[np.ndarray], np.ndarray],
 ) -> list[Conductor]:
-    """Closed conductors on the boundary of a 2D :mod:`simgeometry` shape.
+    """Closed conductors on the boundary of a 2D `simgeometry` shape.
 
-    One :class:`Conductor` per boundary loop of ``shape.outlines(max_panel_length)``
+    One `Conductor` per boundary loop of ``shape.outlines(max_panel_length)``
     (an ``Aperture2D`` gives two, one per plate), all held at ``potential``; an open
     curve such as a ``Polyline`` (a plate of zero thickness) gives an open conductor. Panels are
     at most ``max_panel_length`` long; it can also be a function of ``(2, m)`` points
@@ -193,17 +273,75 @@ def conductors_from_shape(
     ]
 
 
+def _grounded_circle_problem() -> ConvergenceProblem:
+    """A line charge outside a grounded circle, against its three-image solution.
+
+    Circle of radius ``a = 1.5``, unit charge at ``d = 5``: the image ``-q`` at
+    ``a^2 / d`` and ``q_c = -q ln(d / a) / ln(a)`` at the centre (no conductor at
+    infinity, unit reference length). The errors of the potential at seven points on a
+    circle of radius 3 and of the force on the charge, against the panel length.
+    """
+    from simgeometry import Circle
+
+    a, d = 1.5, 5.0
+    z_image, q_centre = a * a / d, -np.log(d / a) / np.log(a)
+    angle = np.linspace(0.0, 2.0 * np.pi, 7, endpoint=False) + 0.1
+    points = 3.0 * np.stack((np.cos(angle), np.sin(angle)))
+    distance = np.hypot(points[0][:, None] - [d, z_image, 0.0], points[1][:, None]).T
+    exact_phi = -2.0 * (
+        np.log(distance[0]) - np.log(distance[1]) + q_centre * np.log(distance[2])
+    )
+    exact_force = -2.0 / (d - z_image) + 2.0 * q_centre / d
+
+    def error(panel: float) -> dict[str, float]:
+        conductors = conductors_from_shape(
+            Circle(midpoint=(0, 0), radius=a), 0.0, panel
+        )
+        electrodes = BoundaryIntegralElectrodes(conductors, k_e=1.0)
+        electrodes.solve(np.array([[d], [0.0]]), np.array([1.0]))
+        phi = electrodes.potential(points)
+        force = electrodes.force_on_sources()[1][0, 0]
+        return {
+            "potential": float(np.max(np.abs(phi - exact_phi))),
+            "force": float(abs(force - exact_force)),
+        }
+
+    return ConvergenceProblem(
+        error, steps=[2.0 * np.pi * a / n for n in (50, 100, 200, 400)]
+    )
+
+
+@method(
+    equations={
+        "boundary_integral": r"-2k_e\int_{\Gamma}\sigma(\mathbf y)\ln|\mathbf x - \mathbf y|\,ds_y \;-\; 2k_e\sum_j q_j\ln|\mathbf x - \mathbf r_j| = V_k, \qquad \mathbf x \in \Gamma_k",
+        "collocation": r"\mathsf S\,\mathbf Q = \mathbf V / k_e - \boldsymbol\phi_\mathrm{free}^\mathrm{raw}, \qquad \phi_\mathrm{free}^\mathrm{raw}(\mathbf m_i) = -\sum_j q_j \ln|\mathbf m_i - \mathbf r_j|^2",
+        "self_term": r"S_{kk} = -\frac{2}{L_k}\int_{-L_k/2}^{L_k/2}\ln|t|\,dt = 2\left(1 - \ln\frac{L_k}{2}\right)",
+        "panels": r"S_{ik} = \begin{cases} \phi_\mathrm{seg}(\mathbf m_i;\, k) & |\mathbf m_i - \mathbf m_k| < n_\mathrm{near} L_k \\ -\sum_{g=1}^{G} w_g \ln|\mathbf m_i - \mathbf y_{k,g}|^2 & \text{otherwise} \end{cases}",
+        "far_points": r"\mathbf y_{k,g} = \mathbf a_k + \xi_g (\mathbf b_k - \mathbf a_k), \qquad \xi_g = \frac{x_g + 1}{2}, \quad w_g = \frac{\omega_g}{2}, \qquad \text{error } O\big((L/r)^{2G}\big)",
+        "field": r"\phi(\mathbf x) = k_e\Big[\sum_{k\ \mathrm{near}} Q_k\, \phi_\mathrm{seg}(\mathbf x; k) + \sum_{k\ \mathrm{far}} \sum_g Q_k w_g\, \phi_\mathrm{pt}(\mathbf x - \mathbf y_{k,g}) - \sum_j q_j \ln|\mathbf x - \mathbf r_j|^2\Big]",
+    },
+    order={"potential": 2, "force": 2},
+    assumptions=(
+        r"a first-kind single-layer equation; straight panels of uniform charge $Q_k$ (piecewise-constant density), collocated at their midpoints $\mathbf m_k$",
+        r"$G$ = `far_points` = 2 Gauss-Legendre nodes $x_g$, weights $\omega_g$, per far panel; panels within $n_\mathrm{near}$ = `near_field` = 4 of their lengths enter exactly (`segment_field`)",
+        r"$\mathsf S$ is dense and not symmetric: LU-factorised once, $O(P^3)$, and $O(P^2)$ per `solve`; no regularisation or preconditioning",
+        r"no conductor at infinity and no constraint on the total charge: the reference length of the logarithm is the unit of length, and a lone conductor of logarithmic capacity 1 (a circle of radius 1) makes $\mathsf S$ singular",
+        r"keep panels shorter than the gaps between surfaces; the order is in the panel length",
+    ),
+    components=(segment_field, "tree_d_3d.flat_tree.direct_field"),
+    problem=_grounded_circle_problem,
+)
 class BoundaryIntegralElectrodes:
     """Conductors held at prescribed potentials, by the single-layer boundary integral.
 
-    ``conductors`` is a sequence of :class:`Conductor`. Call :meth:`solve` once per
+    ``conductors`` is a sequence of `Conductor`. Call `solve` once per
     configuration of free charges (or with none, for a pure capacitance problem); then
-    :meth:`probe` (and :meth:`potential`, :meth:`field`) give the total field --
-    electrodes plus free charges -- at arbitrary points, and :meth:`force_on_sources`
+    `probe` (and `potential`, `field`) give the total field --
+    electrodes plus free charges -- at arbitrary points, and `force_on_sources`
     the force the electrodes and the other free charges exert back on the free charges.
 
     Panels within ``near_field`` of their own lengths of a target use the exact field of
-    a uniformly charged segment (:func:`segment_field`); farther ones are summed fast as
+    a uniformly charged segment (`segment_field`); farther ones are summed fast as
     ``far_points`` Gauss--Legendre point charges each, whose error falls as
     ``(L / r) ** (2 * far_points)``. ``near_field=0, far_points=1`` gives the plain
     midpoint rule.
@@ -309,7 +447,7 @@ class BoundaryIntegralElectrodes:
         with sp.region("tree_d_3d.electrodes.factorize", tags=_PROFILE_TAGS):
             self._matrix = self._build_matrix()
             self._lu = lu_factor(self._matrix)
-        #: solved panel charges, set by :meth:`solve`
+        #: solved panel charges, set by `solve`
         self.charge: np.ndarray | None = None
         self._source_positions = np.zeros((2, 0))
         self._source_charges = np.zeros(0)
@@ -360,7 +498,7 @@ class BoundaryIntegralElectrodes:
 
         ``source_positions`` ``(2, N)`` and ``source_charges`` ``(N,)`` are free line
         charges (omit both for a pure capacitance problem). Returns and caches the
-        panel charges, used by :meth:`probe` and :meth:`force_on_sources`.
+        panel charges, used by `probe` and `force_on_sources`.
         """
         if source_positions is None:
             source_positions = np.zeros((2, 0))
@@ -386,8 +524,8 @@ class BoundaryIntegralElectrodes:
     def probe(self, points) -> tuple[np.ndarray, np.ndarray]:
         """Potential (V) and field (V/m, shape ``(2, M)``) at ``points`` ``(2, M)``.
 
-        Includes the solved panel charges and the free charges passed to :meth:`solve`;
-        ``points`` are probes, not sources, so no self term applies. Call :meth:`solve`
+        Includes the solved panel charges and the free charges passed to `solve`;
+        ``points`` are probes, not sources, so no self term applies. Call `solve`
         first.
         """
         if self.charge is None:
@@ -404,9 +542,9 @@ class BoundaryIntegralElectrodes:
     def panel_field(self, points) -> tuple[np.ndarray, np.ndarray]:
         """Potential (V) and field (V/m) at ``points`` ``(2, M)`` of the panels alone.
 
-        The induced charge from the last :meth:`solve`, without the free charges passed
+        The induced charge from the last `solve`, without the free charges passed
         to it: for codes that add the free charges' field themselves (by a tree code,
-        say). Near panels enter exactly, as in :meth:`probe`.
+        say). Near panels enter exactly, as in `probe`.
         """
         if self.charge is None:
             raise RuntimeError("call solve() before panel_field()")
@@ -415,11 +553,11 @@ class BoundaryIntegralElectrodes:
         return self.k_e * phi, self.k_e * e
 
     def tabulate(self, lower, upper, shape) -> TabulatedField:
-        """:meth:`probe` on a regular grid, for fast bilinear interpolation afterwards.
+        """`probe` on a regular grid, for fast bilinear interpolation afterwards.
 
         ``lower`` and ``upper`` are the corners ``(x, y)`` of the rectangle and
         ``shape`` ``(nx, ny)`` the number of grid lines along each axis (at least 2).
-        Like :meth:`probe` it includes the free charges passed to :meth:`solve`, so
+        Like `probe` it includes the free charges passed to `solve`, so
         tabulate a static configuration and scale it, for example by an RF voltage.
         """
         nx, ny = (int(n) for n in shape)
@@ -437,11 +575,11 @@ class BoundaryIntegralElectrodes:
         )
 
     def potential(self, points) -> np.ndarray:
-        """Potential (V) at ``points`` ``(2, M)``; see :meth:`probe`."""
+        """Potential (V) at ``points`` ``(2, M)``; see `probe`."""
         return self.probe(points)[0]
 
     def field(self, points) -> np.ndarray:
-        """Field (V/m, shape ``(2, M)``) at ``points`` ``(2, M)``; see :meth:`probe`."""
+        """Field (V/m, shape ``(2, M)``) at ``points`` ``(2, M)``; see `probe`."""
         return self.probe(points)[1]
 
     def force_on_sources(self) -> tuple[np.ndarray, np.ndarray]:
@@ -449,7 +587,7 @@ class BoundaryIntegralElectrodes:
 
         Excludes each source's own singular self-term, so multiplying the field by a
         source's charge gives the physical force on it from the panels and the other
-        sources. Call :meth:`solve` first.
+        sources. Call `solve` first.
         """
         if self.charge is None:
             raise RuntimeError("call solve() before force_on_sources()")

@@ -1,7 +1,7 @@
 """The object quadtree: a readable reference implementation of the flat tree.
 
 It evaluates one target at a time in Python, with the same moments (through the
-quadrupole) and opening criterion as :class:`tree_d_3d.flat_tree.FlatQuadtree`; kept for
+quadrupole) and opening criterion as `tree_d_3d.flat_tree.FlatQuadtree`; kept for
 inspection and tests.
 """
 
@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 import numpy as np
+from methodcard import method
 
 from tree_d_3d._utils import _finite
 from tree_d_3d.bodies import ChargedBody
@@ -40,6 +41,16 @@ class ReferenceNode:
         return self.NW, self.NE, self.SW, self.SE
 
 
+@method(
+    equations={
+        "insert": r"\text{a leaf splits when an insertion would exceed } N_\mathrm{leaf} \text{ (below } d_\mathrm{max}\text{)}; \quad Q, \mathbf p, \mathsf S \mathrel{+}= q, \ q\mathbf d, \ q\,\mathbf d\mathbf d^{\mathsf T} \text{ on the way down}",
+        "multipole": r"\phi \mathrel{+}= \frac{Q}{\rho} + \frac{\mathbf p\cdot\mathbf R}{\rho^3} + \frac12\left(\frac{3\,\mathbf R^{\mathsf T}\mathsf S\mathbf R}{\rho^5} - \frac{\operatorname{tr}\mathsf S}{\rho^3}\right) \quad \text{if } \mathbf r \notin \text{cell and } 2h < \theta D",
+    },
+    assumptions=(
+        r"one particle at a time, recursively in Python: the same tree, moments and opening rule as `FlatQuadtree` and its Coulomb walk, kept for inspection and tests",
+        r"an `exclude` body away from the probe point makes the sum exact ($\theta = 0$)",
+    ),
+)
 class ReferenceQuadtree:
     """Bounded-depth quadtree with signed moments through quadrupole order.
 
@@ -167,7 +178,8 @@ class ReferenceQuadtree:
         """Return (potential, electric field), excluding one source by identity.
 
         Potential and field use the same softened multipole expansion. Rebuild
-        the tree after moving or changing any source particle.
+        the tree after moving or changing any source particle. An ``exclude``
+        body that is not at ``position`` makes the sum exact (``theta = 0``).
         """
         point = np.asarray(position, dtype=float)
         if point.shape != (2,) or not np.all(np.isfinite(point)):

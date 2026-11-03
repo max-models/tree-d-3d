@@ -1,4 +1,4 @@
-"""A line-charge FMM with smooth cell membership.
+r"""A line-charge FMM with smooth cell membership.
 
 Forces are the exact gradient of a smooth potential energy, and mutual pair forces
 are exactly antisymmetric.
@@ -7,10 +7,10 @@ This is a NumPy prototype for method research, not a fast code: everything is
 complex arithmetic on small arrays, and it is meant for a few thousand particles.
 It separates two things the production tree ties together:
 
-* a :class:`BoxTree`: a static set of square cells (split until a cell holds at most
+* a `BoxTree`: a static set of square cells (split until a cell holds at most
   ``leaf_capacity`` of the positions it was built from). The cells can be kept across
   time steps, so the interaction lists depend on nothing that moves;
-* a :class:`SmoothFMM` over that tree for given positions and charges.
+* a `SmoothFMM` over that tree for given positions and charges.
 
 **Membership.** A particle belongs to every leaf whose box, grown by ``band``, contains
 it, with a weight ``w_L(z)`` that is the tensor product of quintic smoothsteps across
@@ -23,11 +23,14 @@ accepted ancestor pair otherwise. ``band = 0`` is the ordinary tree (hard member
 Softening is compact (a smooth charge cloud of radius ``softening``), so the far field of
 a softened particle is exactly the point charge's and the tree solves the same model as the direct sum.
 
-**Energy and forces.** In the units of :mod:`tree_d_3d.flat_tree` (potential of a line
+**Energy and forces.** In the units of `tree_d_3d.flat_tree` (potential of a line
 charge ``-2 q ln r``, field ``2 q d / r^2``, no ``k_e``),
 
-    U = -2 sum_routes w_m w_m' q_i q_j Phi(z_i - z_j),
-    F_i = -dU/dx_i = 2 q_i sum_{m: i in m} [ w_m G_m + Phi_m grad w_m ],
+$$
+U = -2\sum_\mathrm{routes} w_m w_{m'} q_i q_j \Phi(z_i - z_j), \qquad
+\mathbf F_i = -\frac{\partial U}{\partial \mathbf x_i}
+    = 2 q_i \sum_{m \ni i} \big[w_m \mathbf G_m + \Phi_m \nabla w_m\big],
+$$
 
 where ``Phi_m`` and ``G_m`` are the potential and its gradient at ``z_i`` seen through
 membership ``m`` (local expansion of its leaf plus its near-field partners). The
@@ -41,6 +44,7 @@ from __future__ import annotations
 from math import comb, sqrt
 
 import numpy as np
+from methodcard import Rule, method
 
 from tree_d_3d.quad import Quad
 
@@ -189,8 +193,54 @@ class BoxTree:
         return part[keep], leaf[keep], w[keep], dwx[keep], dwy[keep]
 
 
+def direct_energy(pos, charge, softening=0.0):
+    """Exact pair energy, same units as `SmoothFMM.energy`."""
+    z = pos[0] + 1j * pos[1]
+    iu = np.triu_indices(len(z), 1)
+    phi, _ = _disk_kernel(z[iu[0]] - z[iu[1]], softening**2)
+    return float(-2.0 * np.sum(charge[iu[0]] * charge[iu[1]] * phi))
+
+
+def _softening_rules() -> dict:
+    """The SymPy rule of the compact softening, from Gauss's law (for the tests).
+
+    The pair potential inside the cloud is ``ln a`` minus the integral of the enclosed
+    fraction ``1 - (1 - s^2/a^2)^3`` over ``s`` from ``r`` to ``a``; `direct_energy` of
+    two unit charges at distance ``r`` is ``-2`` times it.
+    """
+    import sympy
+
+    r, a, s = sympy.symbols("r a s", positive=True)
+    enclosed = 1 - (1 - s**2 / a**2) ** 3
+    rule = sympy.log(a) - sympy.integrate(sympy.expand(enclosed / s), (s, r, a))
+
+    def call(r, a):
+        pos = np.array([[0.0, r], [0.0, 0.0]])
+        return -0.5 * direct_energy(pos, np.ones(2), softening=a)
+
+    return {"softening": Rule(rule, call, {"r": (0.05, 0.5), "a": (0.6, 1.0)})}
+
+
+@method(
+    equations={
+        "membership": r"w_L(z) = \prod_{e \in \text{edges}} s(t_e), \qquad s(t) = 6u^5 - 15u^4 + 10u^3, \quad u = \frac{t + 1}{2}, \qquad t_e = \frac{\text{signed distance into the leaf}}{b}",
+        "energy": r"U = -2\sum_\mathrm{routes} w_m w_{m'}\, q_i q_j\, \Phi(z_i - z_j)",
+        "force": r"\mathbf F_i = -\frac{\partial U}{\partial \mathbf x_i} = 2 q_i \sum_{m \ni i} \big[w_m \mathbf G_m + \Phi_m \nabla w_m\big]",
+        "softening": r"\Phi(r) = \begin{cases} \ln a - \frac{11}{12} + \frac12\left(3u - \frac32 u^2 + \frac13 u^3\right) & u = r^2/a^2 < 1 \\ \ln r & r \ge a \end{cases}, \qquad \nabla\Phi = \frac{(3 - 3u + u^2)\,\mathbf d}{a^2} \ \ (r < a)",
+    },
+    assumptions=(
+        r"a NumPy prototype for a few thousand line charges; static square cells (`BoxTree`), the M2L, L2L and L2P of `FlatQuadtree.fmm` in complex NumPy",
+        r"$s(t) + s(-t) = 1$ ($C^2$): the weights are a partition of unity for a band $b \le$ the smallest leaf half-width; edges on the root boundary keep weight 1; $b = 0$ is hard membership",
+        r"the $\Phi_m \nabla w_m$ term makes $\mathbf F$ the exact gradient of $U$; the triangle truncation (`symmetric=True`) makes mutual pair forces exactly antisymmetric",
+        r"compact softening, a cloud of density $(1 - r^2/a^2)^2$, $a = \varepsilon$: the far field is exactly the point charge's",
+    ),
+    references=(
+        "[Dehnen, J. Comput. Phys. 179, 27 (2002)](https://doi.org/10.1006/jcph.2002.7026)",
+    ),
+    symbolic=_softening_rules,
+)
 class SmoothFMM:
-    """Potential energy and exact-gradient forces of line charges on a :class:`BoxTree`."""
+    """Potential energy and exact-gradient forces of line charges on a `BoxTree`."""
 
     # -- structure -------------------------------------------------------------
     def _traverse(self, occupied: np.ndarray):
@@ -378,16 +428,8 @@ class SmoothFMM:
         return -2.0 * _disk_kernel(d, self.eps2)[0] @ self.q
 
 
-def direct_energy(pos, charge, softening=0.0):
-    """Exact pair energy, same units as :attr:`SmoothFMM.energy`."""
-    z = pos[0] + 1j * pos[1]
-    iu = np.triu_indices(len(z), 1)
-    phi, _ = _disk_kernel(z[iu[0]] - z[iu[1]], softening**2)
-    return float(-2.0 * np.sum(charge[iu[0]] * charge[iu[1]] * phi))
-
-
 def direct_fields(pos, charge, softening=0.0):
-    """Exact potential and field, same units as :meth:`SmoothFMM.fields`."""
+    """Exact potential and field, same units as `SmoothFMM.fields`."""
     z = pos[0] + 1j * pos[1]
     d = z[:, None] - z[None, :]
     np.fill_diagonal(d, 1.0)
@@ -398,6 +440,16 @@ def direct_fields(pos, charge, softening=0.0):
     return -2.0 * (phi @ charge), np.stack((np.real(e), np.imag(e)))
 
 
+@method(
+    equations={
+        "frame": r"U(\mathbf x) = U_\mathrm{tree}\big(\mathbf x - (\mathbf c(\mathbf x) - \mathbf c_0)\big), \qquad \mathbf c = \frac{\sum_i m_i \mathbf x_i}{\sum_i m_i}",
+        "field": r"\mathbf E_i \to \mathbf E_i - \frac{m_i}{M}\,\frac{\mathbf F_\mathrm{net}}{q_i}, \qquad \mathbf F_\mathrm{net} = \sum_j q_j \mathbf E_j",
+    },
+    assumptions=(
+        r"the boxes follow the centre of mass, so $U$ is translation invariant and its exact gradient has zero net force: energy and momentum both conserved by a symplectic integrator",
+    ),
+    components=(SmoothFMM,),
+)
 def comoving_fields(
     tree: BoxTree,
     pos: np.ndarray,

@@ -2,7 +2,7 @@
 
 ``soften_pairs_pyccel.py`` next to this file is the CPU version with the same
 arguments. One thread per pair adds into zeroed atomic float32 delta arrays (see
-:meth:`~cunumpy.kernels.KernelPackage.metal_kernel` with ``atomic_outputs=True``); the host adds those to ``phi`` and ``field`` in
+`cunumpy.kernels.KernelPackage.metal_kernel` with ``atomic_outputs=True``); the host adds those to ``phi`` and ``field`` in
 float64. A pair at zero separation sets ``status[0]`` to its index + 1 (the first
 such pair; the other pairs are still applied).
 """

@@ -3,7 +3,7 @@
 ``evaluate_quadtree_pyccel.py`` next to this file is the CPU version with the same
 arguments. One thread per target, each walking the tree with a stack in thread
 memory (the ``stack`` argument is the CPU's scratch and unused here); a tree too
-deep for it reports status -1. See :mod:`tree_d_3d.kernels._metal`.
+deep for it reports status -1. See `tree_d_3d.kernels._metal`.
 """
 
 from __future__ import annotations

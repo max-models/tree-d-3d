@@ -2,21 +2,21 @@
 
 The particles move in a plane for now; full 3D, on an octree, is planned.
 
-* :class:`FlatQuadtree` and :func:`direct_field`: fields of point charges (the 3D
+* `FlatQuadtree` and `direct_field`: fields of point charges (the 3D
   Coulomb kernel) or line charges (``kernel="log"``, the 2D Poisson kernel) at
   arbitrary targets, by tree walk, FMM or direct sum, on NumPy or CuPy arrays.
-* :class:`ElectrostaticSimulation`: time integration of :class:`ChargedBody`
+* `ElectrostaticSimulation`: time integration of `ChargedBody`
   particles with an optional uniform magnetic field, absorbing walls and absorbing
-  :mod:`simgeometry` shapes.
-* :class:`ReferenceQuadtree`: a readable object tree computing the same as the flat tree.
-* :class:`GroundedStripField`: line charges between two grounded plates, by
+  `simgeometry` shapes.
+* `ReferenceQuadtree`: a readable object tree computing the same as the flat tree.
+* `GroundedStripField`: line charges between two grounded plates, by
   conformal mapping and the FMM.
-* :class:`BoundaryIntegralElectrodes`: conductors at prescribed potentials, by the
-  single-layer boundary-integral (panel) method, with :func:`conductors_from_shape`
-  panelling any 2D :mod:`simgeometry` shape.
-* :mod:`tree_d_3d.gravity`: the classic gravitational Barnes-Hut N-body code.
+* `BoundaryIntegralElectrodes`: conductors at prescribed potentials, by the
+  single-layer boundary-integral (panel) method, with `conductors_from_shape`
+  panelling any 2D `simgeometry` shape.
+* `tree_d_3d.gravity`: the classic gravitational Barnes-Hut N-body code.
 
-The compiled kernels are in :mod:`tree_d_3d.kernels`.
+The compiled kernels are in `tree_d_3d.kernels`.
 
 The solvers carry scope-profiler regions, tagged ``"tree_d_3d"``. The tag is opt-in, so
 they record nothing unless the application enables it, for example with

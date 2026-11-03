@@ -1,22 +1,23 @@
 """The flat quadtree and direct sums: free-space electrostatics for charges constrained to the xy plane.
 
-Uses the three-dimensional softened Coulomb kernel, not the logarithmic
-Green's function of 2D Poisson. No periodic images, conducting walls,
+Two kernels: the three-dimensional softened Coulomb kernel of point charges in the
+plane (``kernel="coulomb"``) and the logarithmic Green's function of 2D Poisson, of
+line charges along z (``kernel="log"``). No periodic images, conducting walls,
 collisions, radiation, or relativistic effects are included.
 
 The simulation stores particles as arrays and evaluates fields with the
 kernels ``tree_d_3d.kernels.<name>`` (``quadtree_quadrants``,
-``evaluate_quadtree``, ``fmm_m2l``, ...): a flat quadtree (:class:`FlatQuadtree`) or, for small systems,
-an exact direct sum. The object tree :class:`ReferenceQuadtree` is the readable
+``evaluate_quadtree``, ``fmm_m2l``, ...): a flat quadtree (`FlatQuadtree`) or, for small systems,
+an exact direct sum. The object tree `ReferenceQuadtree` is the readable
 reference implementation of the same algorithm and is kept for inspection and
 tests.
 
 Each kernel has a Pyccel, a NumPy and a CUDA version with the same arguments, and
-runs the one matching its arrays. :class:`FlatQuadtree` and :func:`direct_field`
+runs the one matching its arrays. `FlatQuadtree` and `direct_field`
 work on arrays of cunumpy's active backend: on NumPy the Pyccel versions run (the
 NumPy versions without Pyccel), on CuPy the CUDA versions, with the launch sizes
 given here; their results are arrays of that backend. The simulation keeps its
-particles on the host (each :class:`ChargedBody` is a view of a column) and hands them
+particles on the host (each `ChargedBody` is a view of a column) and hands them
 to the field solver, which returns to the host.
 
 Per-particle arrays with a component axis are component-major: positions,
@@ -31,6 +32,7 @@ from __future__ import annotations
 import cunumpy as xp
 import numpy as np
 import scope_profiler as sp
+from methodcard import ConvergenceProblem, Rule, method
 
 from tree_d_3d._profiling import _PROFILE_TAGS
 from tree_d_3d._utils import _check, _device, _finite, _host, _points
@@ -45,6 +47,52 @@ MAX_ORDER = 64
 _KERNELS = ("coulomb", "log")
 
 
+def _direct_rules() -> dict:
+    """The SymPy rules of `direct_field`: one source, one target (for the tests)."""
+    import sympy
+
+    x, y, x1, y1, q1, eps = sympy.symbols("x y x1 y1 q1 eps", real=True)
+    r2 = (x - x1) ** 2 + (y - y1) ** 2 + eps**2
+    coulomb = q1 / sympy.sqrt(r2)
+    log = -q1 * sympy.log(r2)
+    ranges = {"x": (1.0, 2.0), "y": (-1.0, 1.0), "x1": (-1.0, 0.5)}
+    ranges |= {"y1": (-1.0, 1.0), "q1": (-2.0, 2.0), "eps": (0.0, 0.5)}
+
+    def field(kernel: str, potential: bool):
+        def call(x, y, x1, y1, q1, eps):
+            phi, e = direct_field(
+                np.array([[x], [y]]),
+                np.array([[x1], [y1]]),
+                np.array([q1]),
+                softening=eps,
+                kernel=kernel,
+            )
+            return float(phi[0]) if potential else float(e[0, 0])
+
+        return call
+
+    return {
+        "coulomb_potential": Rule(coulomb, field("coulomb", True), ranges),
+        "coulomb_field": Rule(-sympy.diff(coulomb, x), field("coulomb", False), ranges),
+        "log_potential": Rule(log, field("log", True), ranges),
+        "log_field": Rule(-sympy.diff(log, x), field("log", False), ranges),
+    }
+
+
+@method(
+    equations={
+        "coulomb_potential": r"\phi(\mathbf r) = \sum_j \frac{q_j}{\sqrt{|\mathbf r - \mathbf r_j|^2 + \varepsilon^2}}",
+        "coulomb_field": r"\mathbf E(\mathbf r) = -\nabla\phi = \sum_j \frac{q_j\,(\mathbf r - \mathbf r_j)}{\left(|\mathbf r - \mathbf r_j|^2 + \varepsilon^2\right)^{3/2}}",
+        "log_potential": r"\phi(\mathbf r) = -\sum_j q_j \ln\left(|\mathbf r - \mathbf r_j|^2 + \varepsilon^2\right)",
+        "log_field": r"\mathbf E(\mathbf r) = 2\sum_j \frac{q_j\,(\mathbf r - \mathbf r_j)}{|\mathbf r - \mathbf r_j|^2 + \varepsilon^2}",
+    },
+    assumptions=(
+        r"raw kernels: the callers multiply by $k_e = 1/(4\pi\varepsilon_0)$",
+        r"`coulomb`: point charges confined to the plane; `log`: line charges along $z$ per unit length, $\phi = -(\lambda/2\pi\varepsilon_0)\ln r$",
+        r"Plummer softening $\varepsilon$; the excluded source and zero charges are skipped; a charged pair at $r^2 + \varepsilon^2 = 0$ raises",
+    ),
+    symbolic=_direct_rules,
+)
 @sp.profile("tree_d_3d.flat_tree.direct_field", tags=_PROFILE_TAGS)
 def direct_field(
     targets,
@@ -60,7 +108,7 @@ def direct_field(
 
     ``pos`` ``(2, N)`` and ``charge`` ``(N,)`` are the sources. ``exclude[i]``
     is the index of a source skipped for target ``i`` (-1 for none). ``kernel``
-    is ``"coulomb"`` or ``"log"`` (line charges), as for :class:`FlatQuadtree`.
+    is ``"coulomb"`` or ``"log"`` (line charges), as for `FlatQuadtree`.
     """
     if kernel not in _KERNELS:
         raise ValueError(f"kernel must be one of {_KERNELS}")
@@ -85,7 +133,7 @@ def direct_field(
 
 
 class FlatNode:
-    """Read-only view of one node of a :class:`FlatQuadtree`."""
+    """Read-only view of one node of a `FlatQuadtree`."""
 
     def __init__(self, tree: FlatQuadtree, index: int) -> None:
         self.tree = tree
@@ -155,10 +203,199 @@ def _binomial_table(size: int) -> np.ndarray:
     return table
 
 
+def _moment_rules() -> dict:
+    """The SymPy rules of the cell moments: two charges in a root cell (for the tests)."""
+    import sympy
+
+    cx, cy, x1, y1, x2, y2 = sympy.symbols("cx cy x1 y1 x2 y2", real=True)
+    q1, q2 = sympy.symbols("q1 q2", real=True)
+    terms = ((q1, x1, y1), (q2, x2, y2))
+    s_xy = sum(q * (x - cx) * (y - cy) for q, x, y in terms)
+    a_3 = sum(q * (x - cx + sympy.I * (y - cy)) ** 3 for q, x, y in terms)
+    # absolute positions, inside the cell of half-width 1 about (cx, cy)
+    ranges = {name: (-0.85, 0.85) for name in ("x1", "y1", "x2", "y2")}
+    ranges |= {"cx": (-0.1, 0.1), "cy": (-0.1, 0.1), "q1": (-2.0, 2.0)}
+    ranges |= {"q2": (-2.0, 2.0)}
+
+    def root(kernel: str):
+        def call(cx, cy, x1, y1, x2, y2, q1, q2):
+            tree = FlatQuadtree(
+                np.array([[x1, x2], [y1, y2]]),
+                np.array([q1, q2]),
+                Quad(cx, cy, 1.0),
+                leaf_capacity=1,
+                kernel=kernel,
+                order=3,
+            )
+            if kernel == "log":
+                return float(tree.moment_im[0, 3])
+            return float(tree.node_s[0, 1])
+
+        return call
+
+    return {
+        "coulomb_moments": Rule(s_xy, root("coulomb"), ranges),
+        "log_moments": Rule(sympy.im(sympy.expand(a_3)), root("log"), ranges),
+    }
+
+
+def _multipole_rules() -> dict:
+    """The SymPy rules of the far-field expansions: an accepted root cell (for the tests).
+
+    Two charges in the cell ``[-1, 1]^2``, split into leaves, and a target beyond
+    ``2 h / theta``, so the walk takes the root's expansion: through the quadrupole for
+    the Coulomb kernel, to order ``p = 3`` for the log kernel.
+    """
+    import sympy
+
+    x, y, eps = sympy.symbols("x y eps", real=True)
+    x1, y1, x2, y2 = sympy.symbols("x1 y1 x2 y2", real=True)
+    q1, q2 = sympy.symbols("q1 q2", real=True)
+    terms = ((q1, x1, y1), (q2, x2, y2))
+    charge = q1 + q2
+    p_x = sum(q * xj for q, xj, _ in terms)
+    p_y = sum(q * yj for q, _, yj in terms)
+    s_xx = sum(q * xj * xj for q, xj, _ in terms)
+    s_xy = sum(q * xj * yj for q, xj, yj in terms)
+    s_yy = sum(q * yj * yj for q, _, yj in terms)
+    rho = sympy.sqrt(x**2 + y**2 + eps**2)
+    quadratic = s_xx * x**2 + 2 * s_xy * x * y + s_yy * y**2
+    coulomb = (
+        charge / rho
+        + (p_x * x + p_y * y) / rho**3
+        + (3 * quadratic / rho**5 - (s_xx + s_yy) / rho**3) / 2
+    )
+    w = 1 / (x + sympy.I * y)
+    series = sum(
+        sum(q * (xj + sympy.I * yj) ** n for q, xj, yj in terms) * w**n / n
+        for n in range(1, 4)
+    )
+    log = -charge * sympy.log(x**2 + y**2) + 2 * sympy.re(sympy.expand_complex(series))
+    ranges = {name: (-0.9, 0.9) for name in ("x1", "y1", "x2", "y2")}
+    ranges |= {"x": (2.5, 4.0), "y": (2.5, 4.0), "eps": (0.0, 0.5)}
+    ranges |= {"q1": (-2.0, 2.0), "q2": (-2.0, 2.0)}
+
+    def walk(kernel: str):
+        def call(x, y, x1, y1, x2, y2, q1, q2, eps=0.0):
+            tree = FlatQuadtree(
+                np.array([[x1, x2], [y1, y2]]),
+                np.array([q1, q2]),
+                Quad(0.0, 0.0, 1.0),
+                leaf_capacity=1,
+                kernel=kernel,
+                order=3,
+            )
+            phi, _ = tree.evaluate(np.array([[x], [y]]), theta=1.0, softening=eps)
+            return float(phi[0])
+
+        return call
+
+    return {
+        "coulomb_multipole": Rule(coulomb, walk("coulomb"), ranges),
+        "log_multipole": Rule(log, walk("log"), ranges),
+    }
+
+
+def _walk_problem() -> ConvergenceProblem:
+    """The far-field error of one accepted cell against the size of its charges.
+
+    Twelve charges at ``s`` times fixed offsets in the root cell, sixteen targets on a
+    circle of radius 4: the walk takes the root's expansion, so the error is its
+    truncation error, ``O(s^3)`` through the quadrupole and ``O(s^{p+1})`` for the log
+    kernel at ``p = 2``.
+    """
+    rng = np.random.default_rng(1)
+    offsets = rng.uniform(-0.5, 0.5, (2, 12))
+    charges = rng.normal(0.3, 1.0, 12)
+    angle = np.linspace(0.0, 2.0 * np.pi, 16, endpoint=False)
+    targets = 4.0 * np.stack((np.cos(angle), np.sin(angle)))
+
+    def error(size: float) -> dict[str, float]:
+        errors = {}
+        for kernel in _KERNELS:
+            pos = size * offsets
+            tree = FlatQuadtree(
+                pos,
+                charges,
+                Quad(0.0, 0.0, 1.0),
+                leaf_capacity=1,
+                kernel=kernel,
+                order=2,
+            )
+            _, field = tree.evaluate(targets, theta=0.9)
+            _, exact = direct_field(targets, pos, charges, kernel=kernel)
+            errors[kernel] = float(np.max(np.abs(_host(field) - _host(exact))))
+        return errors
+
+    return ConvergenceProblem(error, steps=[1.0, 0.5, 0.25, 0.125])
+
+
+def _fmm_problem() -> ConvergenceProblem:
+    """The FMM error against the size of the charge clusters, at ``p = 2``.
+
+    Four clusters of three charges at the centres of depth-2 cells, two in opposite
+    corners of the root: those two interact by one M2L, the rest by P2P. Shrinking the
+    clusters by ``s`` leaves the tree as it is, so the error is the truncation error of
+    that M2L and the L2P, ``O(s^{p+1})`` in the potential and ``O(s^p)`` in the field.
+    """
+    rng = np.random.default_rng(2)
+    centres = np.array([[-0.75, -0.25, 0.75, 0.25], [0.75, 0.25, -0.75, -0.25]])
+    offsets = rng.uniform(-0.2, 0.2, (2, 4, 3))
+    charges = rng.normal(0.3, 1.0, 12)
+    everyone = np.arange(12)
+
+    def error(size: float) -> dict[str, float]:
+        pos = (centres[:, :, None] + size * offsets).reshape(2, -1)
+        tree = FlatQuadtree(
+            pos, charges, Quad(0.0, 0.0, 1.0), leaf_capacity=3, kernel="log", order=2
+        )
+        phi, field = tree.fmm(theta=0.5)
+        phi_exact, exact = direct_field(
+            pos, pos, charges, exclude=everyone, kernel="log"
+        )
+        return {
+            "potential": float(np.max(np.abs(_host(phi) - _host(phi_exact)))),
+            "field": float(np.max(np.abs(_host(field) - _host(exact)))),
+        }
+
+    return ConvergenceProblem(error, steps=[0.5, 0.25, 0.125, 0.0625])
+
+
+def _reference_rules() -> dict:
+    """The SymPy rule of `FlatQuadtree.field_at` for one line charge (for the tests)."""
+    import sympy
+
+    x, y, q, k_e, r_0 = sympy.symbols("x y q k_e r_0", positive=True)
+    rule = -2 * k_e * q * sympy.log(sympy.sqrt(x**2 + y**2) / r_0)
+
+    def call(x, y, q, k_e, r_0):
+        tree = FlatQuadtree(
+            np.zeros((2, 1)), np.array([q]), Quad(0.0, 0.0, 1.0), kernel="log"
+        )
+        phi, _ = tree.field_at(np.array([[x], [y]]), k_e=k_e, reference_radius=r_0)
+        return float(phi[0])
+
+    return {"log_potential": Rule(rule, call, {"r_0": (0.5, 3.0)})}
+
+
+@method(
+    equations={
+        "split": r"N_\mathrm{cell} > N_\mathrm{leaf},\ \ \mathrm{depth} < d_\mathrm{max} \ \Rightarrow\ \text{four children of half-width } h/2,\ \mathbf c \pm h/2",
+        "quadrant": r"k = [x > x_\mathrm{mid}] + 2\,[y < y_\mathrm{mid}] \qquad (0\text{ upper left},\ 1\text{ upper right},\ 2\text{ lower left},\ 3\text{ lower right})",
+        "coulomb_moments": r"Q = \sum_j q_j, \qquad \mathbf p = \sum_j q_j \mathbf d_j, \qquad \mathsf S = \sum_j q_j\, \mathbf d_j \mathbf d_j^{\mathsf T}, \qquad \mathbf d_j = \mathbf r_j - \mathbf c",
+        "log_moments": r"a_n = \sum_j q_j (z_j - c)^n, \qquad n = 0, \dots, p, \qquad z = x + iy",
+    },
+    assumptions=(
+        r"a square root cell; built level by level, breadth first, with a stable partition: the order inside a cell is the input order",
+        r"moments about the geometric cell centre $\mathbf c$, summed directly from each node's particles (no M2M); $\mathsf S$ is raw, not traceless",
+        r"cells with $\sum_j |q_j| = 0$ are skipped by the walks; a particle on a dividing line goes left or up",
+    ),
+    symbolic=_moment_rules,
+)
 class FlatQuadtree:
     """Array quadtree for point charges in a plane or for line charges.
 
-    Same tree and opening rule as :class:`ReferenceQuadtree`: nodes holding
+    Same tree and opening rule as `ReferenceQuadtree`: nodes holding
     more than ``leaf_capacity`` particles split into four until
     ``max_depth``, cells containing the target are always opened, and the
     opening test uses unsoftened distance. ``positions`` is ``(2, N)``
@@ -396,6 +633,28 @@ class FlatQuadtree:
         occupied = _host(self._xp.flatnonzero(self.node_end > self.node_start))
         return [FlatNode(self, int(i)) for i in occupied]
 
+    @method(
+        equations={
+            "acceptance": r"\text{accept the cell if } \mathbf r \notin \text{cell} \ \text{ and }\ 2h < \theta D, \qquad D = |\mathbf r - \mathbf c|\ \text{(unsoftened)}",
+            "coulomb_multipole": r"\phi \mathrel{+}= \frac{Q}{\rho} + \frac{\mathbf p\cdot\mathbf R}{\rho^3} + \frac12\left(\frac{3\,\mathbf R^{\mathsf T}\mathsf S\mathbf R}{\rho^5} - \frac{\operatorname{tr}\mathsf S}{\rho^3}\right), \qquad \mathbf R = \mathbf r - \mathbf c, \quad \rho = \sqrt{D^2 + \varepsilon^2}",
+            "coulomb_field": r"\mathbf E \mathrel{+}= \frac{Q\mathbf R}{\rho^3} + \frac{3(\mathbf p\cdot\mathbf R)\mathbf R}{\rho^5} - \frac{\mathbf p}{\rho^3} + \frac{15}{2}\frac{(\mathbf R^{\mathsf T}\mathsf S\mathbf R)\mathbf R}{\rho^7} - \frac{3\,\mathsf S\mathbf R}{\rho^5} - \frac32\frac{\operatorname{tr}\mathsf S\,\mathbf R}{\rho^5}",
+            "log_multipole": r"\phi \mathrel{+}= -a_0 \ln|z - c|^2 + 2\sum_{n=1}^{p} \frac{\operatorname{Re}(a_n w^n)}{n}, \qquad E_x - iE_y \mathrel{+}= 2\sum_{n=0}^{p} a_n w^{n+1}, \qquad w = \frac{1}{z - c}",
+            "leaves": r"\text{leaves: the softened direct sum of } \texttt{direct\_field}",
+        },
+        order={"coulomb": 3, "log": 3},
+        assumptions=(
+            r"one target at a time, an explicit stack; the cell holding the target is always opened, whatever $\theta$ and $\varepsilon$; $\theta = 0$ is the exact sum",
+            r"the Coulomb expansion through the quadrupole, from the Taylor series of $1/|\mathbf R - \mathbf d|$ with $R \to \rho$; $\mathbf E = -\nabla\phi$ holds exactly for this softened form",
+            r"accepted log-kernel cells are unsoftened: softening acts on the direct leaf pairs only, an $O(\varepsilon^2/D^2)$ difference in the far field",
+            r"the order is in the size of an accepted cell's charges over its distance, so in $\theta$: 3 through the quadrupole, $p + 1$ for the log kernel (3 at the $p = 2$ of the test problem)",
+        ),
+        references=(
+            "[Barnes and Hut, Nature 324, 446 (1986)](https://doi.org/10.1038/324446a0)",
+        ),
+        components=("tree_d_3d.flat_tree.direct_field",),
+        symbolic=_multipole_rules,
+        problem=_walk_problem,
+    )
     @sp.profile("tree_d_3d.flat_tree.evaluate", tags=_PROFILE_TAGS)
     def evaluate(self, targets, *, exclude=None, theta=0.5, softening=0.0):
         """Potential ``(M,)`` and field ``(2, M)`` at ``targets`` ``(2, M)``, without ``k_e``.
@@ -502,6 +761,31 @@ class FlatQuadtree:
                 return m2l, p2p, sizes
             capacity = np.maximum(2 * capacity, sizes[:3])
 
+    @method(
+        equations={
+            "traversal": r"(a, b) \to \begin{cases} \text{M2L} & \sqrt2\,(h_a + h_b) < \theta\, d_{ab} \\ \text{P2P} & a = b \text{ a leaf, or two leaves} \\ \text{split } a \text{ or } b & \text{otherwise (the larger, not a leaf)} \end{cases}",
+            "m2l": r"b_0 \mathrel{+}= a_0\ln t - \sum_{k=1}^{p}\frac{a_k}{k\,t^k}, \qquad b_l \mathrel{+}= \frac{(-1)^{l+1}a_0}{l\,t^l} - \frac{(-1)^l}{t^l}\sum_{k=1}^{k_{\max}}\frac{a_k}{k}\binom{k+l-1}{l}\frac{1}{t^k}, \qquad t = c_\mathrm{dst} - c_\mathrm{src}",
+            "truncation": r"k_{\max} = p \ \text{(rectangle)}, \qquad k_{\max} = p - l \ \text{(triangle, } \texttt{symmetric=True}\text{)}",
+            "l2l": r"b^\mathrm{child}_m \mathrel{+}= \sum_{l=m}^{p} \binom{l}{m} b_l\, s^{\,l-m}, \qquad s = c_\mathrm{child} - c_\mathrm{parent}",
+            "l2p": r"W = \sum_{l=0}^{p} b_l u^l, \qquad \phi \mathrel{+}= -2\operatorname{Re} W, \qquad E_x - iE_y \mathrel{+}= 2W', \qquad u = z_i - c_\mathrm{leaf}",
+            "p2p": r"\phi_i \mathrel{+}= -\sum_j q_j \ln\left(r_{ij}^2 + \varepsilon^2\right), \qquad \mathbf E_i \mathrel{+}= 2\sum_j \frac{q_j\, \mathbf d_{ij}}{r_{ij}^2 + \varepsilon^2}",
+        },
+        order={"potential": 3, "field": 2},
+        assumptions=(
+            r"the log kernel only, $0 < \theta < 1$; every particle is a target; each pair is listed once and used in both directions",
+            r"the local expansion $\Phi_L(z) = \sum_l b_l (z - c)^l$ of degree $p$ about each cell centre; $\ln t$ on the principal branch, which shifts $b_0$ by $2\pi i a_0$ and drops out of $\operatorname{Re}$",
+            r"the triangle truncation makes the mutual pair forces exactly antisymmetric (same error order, larger constant)",
+            r"softening acts on the P2P pairs only; no automatic error control: $\theta$ and $p$ set the accuracy",
+            r"the error of an M2L is $O((r/d)^{p+1})$ in the potential and $O((r/d)^{p})$ in the field, $r/d$ the cluster size over the cell distance; the declared orders are those at the $p = 2$ of the test problem",
+        ),
+        references=(
+            "[Greengard and Rokhlin, J. Comput. Phys. 73, 325 (1987)](https://doi.org/10.1016/0021-9991(87)90140-9)",
+            "[Carrier, Greengard and Rokhlin, SIAM J. Sci. Stat. Comput. 9, 669 (1988)](https://doi.org/10.1137/0909044)",
+            "[Dehnen, J. Comput. Phys. 179, 27 (2002)](https://doi.org/10.1006/jcph.2002.7026)",
+        ),
+        components=("tree_d_3d.flat_tree.FlatQuadtree",),
+        problem=_fmm_problem,
+    )
     @sp.profile("tree_d_3d.flat_tree.fmm", tags=_PROFILE_TAGS)
     def fmm(
         self, *, theta: float = 0.5, softening: float = 0.0, potential: bool = True
@@ -512,9 +796,9 @@ class FlatQuadtree:
         form): a dual-tree traversal pairs well-separated cells, whose
         multipole expansions are translated into each other's local
         expansions (M2L, both ways at once); local expansions are shifted down
-        the tree (L2L) and evaluated at the particles (L2P); adjacent leaves
-        interact exactly (P2P). Cost is O(N) rather than the O(N log N) of
-        :meth:`evaluate` with every particle as a target. Returns the raw
+        the tree (L2L) and evaluated at the particles (L2P); leaves that are
+        not well separated interact exactly (P2P). Cost is O(N) rather than the O(N log N) of
+        `evaluate` with every particle as a target. Returns the raw
         potential ``(N,)`` and field ``(2, N)`` in input order, without ``k_e``,
         excluding each particle's own charge; softening applies to the exact
         near field only.
@@ -593,6 +877,18 @@ class FlatQuadtree:
         self.fmm_pairs = (int(sizes[0]), int(sizes[1]))
         return phi, field
 
+    @method(
+        equations={
+            "coulomb_potential": r"\phi = k_e\, \phi_\mathrm{raw}, \qquad \mathbf E = k_e\, \mathbf E_\mathrm{raw}",
+            "log_potential": r"\phi = k_e\left(\phi_\mathrm{raw} + 2\ln r_0 \sum_j q_j\right) = -2k_e \sum_j q_j \ln\frac{r_j}{r_0}",
+        },
+        assumptions=(
+            r"the log potential is defined up to a constant: $r_0$ (`reference_radius`) shifts energies, not forces",
+            r"$k_e = 1/(4\pi\varepsilon_0)$ by default; SI inputs give SI outputs",
+        ),
+        components=("tree_d_3d.flat_tree.FlatQuadtree.evaluate",),
+        symbolic=_reference_rules,
+    )
     def field_at(
         self,
         positions,

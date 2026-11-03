@@ -2,8 +2,8 @@
 
 ``fmm_traverse_cuda.cu`` next to this file is the CUDA version (GPU) and ``fmm_traverse_numpy.py`` the
 version for machines without Pyccel, all with the same arguments; the folder's
-``__init__.py`` declares the kernel (see :mod:`tree_d_3d.kernels`). The flat
-quadtree is described in :mod:`tree_d_3d.flat_tree`.
+``__init__.py`` declares the kernel (see `tree_d_3d.kernels`). The flat
+quadtree is described in `tree_d_3d.flat_tree`.
 """
 
 # ruff: noqa: F821 -- "int64[:]" annotations are Pyccel types, not Python names.
@@ -30,8 +30,8 @@ def fmm_traverse(
 
     Each node pair of ``frontier[:n_frontier]`` becomes an M2L pair (well
     separated: (r_a + r_b) < theta d, with r the half-diagonal and d the centre
-    distance), a P2P pair (adjacent leaves) or the pairs of its children, appended
-    to ``next_frontier``. Start from the single pair (0, 0) and repeat with the new
+    distance), a P2P pair (two leaves that are not well separated, touching or
+    not) or the pairs of its children, appended to ``next_frontier``. Start from the single pair (0, 0) and repeat with the new
     frontier until it is empty. ``counts`` holds the numbers of M2L, P2P and next
     frontier pairs, and pairs are appended at those positions; ``counts[3]``
     becomes -1 if a buffer is too small (pairs that do not fit are counted, not

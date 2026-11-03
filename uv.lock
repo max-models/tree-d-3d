@@ -2324,6 +2324,23 @@ wheels = [
 ]
 
 [[package]]
+name = "methodcard"
+version = "0.1.0"
+source = { git = "https://github.com/max-models/methodcard?branch=devel#cc1c7bd98faefc860c3dee8b8843045c69990430" }
+dependencies = [
+    { name = "griffe" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
+    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "scope-profiler" },
+]
+
+[package.optional-dependencies]
+symbolic = [
+    { name = "sympy" },
+]
+
+[[package]]
 name = "mistune"
 version = "3.3.4"
 source = { registry = "https://pypi.org/simple" }
@@ -4433,6 +4450,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "cunumpy" },
+    { name = "methodcard" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
     { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
@@ -4450,6 +4468,7 @@ dev = [
     { name = "ipykernel", version = "7.3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "ipykernel", version = "7.4.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "jupyterlab" },
+    { name = "methodcard", extra = ["symbolic"] },
     { name = "nbclient" },
     { name = "nbformat" },
     { name = "plasma-plots", extra = ["plotly"] },
@@ -4481,6 +4500,7 @@ metal = [
     { name = "mlx", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
 ]
 test = [
+    { name = "methodcard", extra = ["symbolic"] },
     { name = "plasma-plots", extra = ["plotly"] },
     { name = "plasmacoll" },
     { name = "pytest" },
@@ -4494,6 +4514,8 @@ requires-dist = [
     { name = "griffe", marker = "extra == 'docs'" },
     { name = "ipykernel", marker = "extra == 'docs'" },
     { name = "jupyterlab", marker = "extra == 'dev'" },
+    { name = "methodcard", git = "https://github.com/max-models/methodcard?branch=devel" },
+    { name = "methodcard", extras = ["symbolic"], marker = "extra == 'test'", git = "https://github.com/max-models/methodcard?branch=devel" },
     { name = "mlx", marker = "platform_machine == 'arm64' and sys_platform == 'darwin' and extra == 'metal'" },
     { name = "nbclient", marker = "extra == 'docs'", specifier = ">=0.10" },
     { name = "nbformat", marker = "extra == 'docs'", specifier = ">=5.10" },
