@@ -3,7 +3,7 @@
 ``pair_energy_pyccel.py`` next to this file is the CPU version with the same
 arguments. One thread per particle ``i`` sums its pairs with ``j > i`` into its own
 entry of ``partial`` (float32); the host adds the sum of ``partial``, in float64,
-to ``energy[0]``. See :mod:`tree_d_3d.kernels._metal`.
+to ``energy[0]``. See `tree_d_3d.kernels._metal`.
 """
 
 from __future__ import annotations

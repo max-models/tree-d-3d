@@ -2,7 +2,7 @@
 
 ``quadtree_moments_pyccel.py`` next to this file is the CPU version with the same
 arguments. One thread per node, each summing its own particles; only the first
-``node_count`` rows of the outputs are written. See :mod:`tree_d_3d.kernels._metal`.
+``node_count`` rows of the outputs are written. See `tree_d_3d.kernels._metal`.
 """
 
 from __future__ import annotations

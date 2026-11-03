@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 import cunumpy as xp
 import numpy as np
 import scope_profiler as sp
+from methodcard import ConvergenceProblem, Rule, method
 
 from tree_d_3d._profiling import _PROFILE_TAGS
 from tree_d_3d._utils import _check, _device, _finite, _host
@@ -68,7 +69,7 @@ class AbsorbedParticles:
     wall or entered the object, so positions lie up to one step beyond the
     boundary; ``wall`` names the wall or object; ``time`` is the end of
     that step. ``position`` and ``velocity`` are ``(2, M)`` (component-major).
-    The bodies themselves are kept in :attr:`bodies`, detached from the
+    The bodies themselves are kept in `bodies`, detached from the
     simulation.
     """
 
@@ -115,6 +116,110 @@ class AbsorbedParticles:
         return len(self.bodies)
 
 
+def _drift_rules() -> dict:
+    """The SymPy rule of the exact gyration drift: one particle, no field (for the tests)."""
+    import sympy
+
+    vx, vy, b_z, dt = sympy.symbols("vx vy B_z dt", real=True)
+    angle = b_z * dt
+    rule = dt * (sympy.sin(angle) / angle * vx + (1 - sympy.cos(angle)) / angle * vy)
+
+    def call(vx, vy, B_z, dt):
+        body = ChargedBody(0.0, 0.0, vx, vy)
+        simulation = ElectrostaticSimulation(
+            [body], Quad(0.0, 0.0, 1.0), dt=dt, B_z=B_z
+        )
+        simulation.step()
+        return float(body.pos[0])
+
+    ranges = {"vx": (-1.0, 1.0), "vy": (-1.0, 1.0), "B_z": (0.1, 3.0)}
+    return {"drift": Rule(rule, call, ranges | {"dt": (0.1, 1.0)})}
+
+
+def _orbit_problem() -> ConvergenceProblem:
+    """A circular orbit about a fixed softened charge in a magnetic field.
+
+    An electron (``q = -1``, ``m = 1``) at radius 1 about a fixed ion, ``k_e = 1``,
+    ``epsilon = 0.1``, ``B_z = 0.7``: the electric and magnetic forces both point inward,
+    so the orbit is circular for ``v^2 = F_e + v B_z``, ``F_e = (1 + epsilon^2)^{-3/2}``.
+    The error is the distance to the exact position after ``t = 2``.
+    """
+    softening, b_z, time = 0.1, 0.7, 2.0
+    attraction = (1 + softening**2) ** (-1.5)
+    speed = 0.5 * (b_z + np.sqrt(b_z**2 + 4 * attraction))
+    exact = np.array([np.cos(speed * time), np.sin(speed * time)])
+
+    def error(dt: float) -> float:
+        electron = ChargedBody(1.0, 0.0, vy=speed, charge=-1.0)
+        ion = ChargedBody(0.0, 0.0, fixed=True)
+        simulation = ElectrostaticSimulation(
+            [electron, ion],
+            Quad(0.0, 0.0, 2.0),
+            theta=0.0,
+            k_e=1.0,
+            softening=softening,
+            dt=dt,
+            B_z=b_z,
+        )
+        for _ in range(round(time / dt)):
+            simulation.step()
+        return float(np.linalg.norm(electron.pos - exact))
+
+    return ConvergenceProblem(error, steps=[0.04, 0.02, 0.01, 0.005])
+
+
+def _pair_energy_rules() -> dict:
+    """The SymPy rules of the exact pair energy of two charges (for the tests)."""
+    import sympy
+
+    x, q1, q2, k_e, eps, r_0 = sympy.symbols("x q1 q2 k_e eps r_0", positive=True)
+    coulomb = k_e * q1 * q2 / sympy.sqrt(x**2 + eps**2)
+    log = -k_e * q1 * q2 * sympy.log((x**2 + eps**2) / r_0**2)
+
+    def energy(kernel: str):
+        def call(x, q1, q2, k_e, eps, r_0=1.0):
+            bodies = [ChargedBody(0.0, 0.0, charge=q1), ChargedBody(x, 0.0, charge=q2)]
+            simulation = ElectrostaticSimulation(
+                bodies,
+                Quad(0.0, 0.0, 4.0),
+                k_e=k_e,
+                softening=eps,
+                kernel=kernel,
+                reference_radius=r_0,
+            )
+            return simulation.get_potential_energy(exact=True)
+
+        return call
+
+    ranges = {"x": (0.2, 3.0), "eps": (0.0, 0.5), "r_0": (0.5, 2.0)}
+    return {
+        "coulomb_pairs": Rule(coulomb, energy("coulomb"), ranges),
+        "log_pairs": Rule(log, energy("log"), ranges),
+    }
+
+
+@method(
+    equations={
+        "motion": r"m_i \dot{\mathbf v}_i = q_i\big(\mathbf E(\mathbf r_i) + \mathbf v_i \times B_z\hat{\mathbf z}\big), \qquad \dot{\mathbf r}_i = \mathbf v_i, \qquad \mathbf E(\mathbf r_i) = k_e\, \mathbf E_\mathrm{raw}(\mathbf r_i;\, j \ne i)",
+        "energy": r"K = \frac12\sum_i m_i v_i^2, \qquad U = \frac12\sum_i q_i \phi_i",
+        "momentum": r"\mathbf P = \sum_i m_i \mathbf v_i, \qquad L_z = \sum_i m_i (x_i v_{y,i} - y_i v_{x,i})",
+        "absorption": r"\text{removed after a drift if } s\,(x_\mathrm{axis} - x_\mathrm{wall}) > 0, \text{ or if the chord } \mathbf r^n \to \mathbf r^{n+1} \text{ enters an object}",
+        "method": r"\texttt{auto}: \text{direct if } \theta = 0 \text{ or } N_\mathrm{charged} \le N_\mathrm{direct} \text{ (or no compiled kernels)}; \text{ else the FMM (log, } \theta < 1\text{), else the tree walk}",
+    },
+    assumptions=(
+        r"free space, nonrelativistic, a uniform static $B_z$; the self-field is excluded ($j \ne i$); fixed sources never move",
+        r"finite-$\theta$ forces are not pairwise symmetric (except the FMM with `symmetric=True`): momentum and energy are conserved to the tree error",
+        r"absorbing walls and objects only remove particles: no image charges, no wall potential",
+    ),
+    components=(
+        "tree_d_3d.simulation.ElectrostaticSimulation.step",
+        "tree_d_3d.simulation.ElectrostaticSimulation.get_potential_energy",
+        "tree_d_3d.bodies.ChargedBody",
+        "tree_d_3d.flat_tree.direct_field",
+        "tree_d_3d.flat_tree.FlatQuadtree.evaluate",
+        "tree_d_3d.flat_tree.FlatQuadtree.fmm",
+    ),
+)
 class ElectrostaticSimulation:
     """Isolated, nonrelativistic electrostatic N-body dynamics in a plane.
 
@@ -126,18 +231,18 @@ class ElectrostaticSimulation:
 
     ``method`` selects the field evaluation: ``"tree"`` (Barnes-Hut at
     ``theta``), ``"direct"`` (exact all-pairs sum), or ``"auto"``, which sums
-    directly for ``theta == 0`` or at most ``direct_threshold`` charged
-    particles, where that is exact and faster. Fields are cached and reused
-    while positions, charges and parameters are unchanged, so one step costs
-    one field evaluation.
+    directly for ``theta == 0``, at most ``direct_threshold`` charged
+    particles, or without the compiled kernels, where that is exact and
+    faster. Fields are cached and reused while positions, charges and
+    parameters are unchanged, so one step costs one field evaluation.
 
     ``absorbing_walls`` maps any of ``x_min``, ``x_max``, ``y_min`` and
     ``y_max`` to a wall coordinate. A particle that ends a drift beyond a wall
     is removed before the end-of-step field evaluation and stops acting as a
-    source; see :attr:`absorbed`. Walls only remove particles: the field
+    source; see `absorbed`. Walls only remove particles: the field
     stays free-space, with no image charges or wall potential.
 
-    ``absorbing_objects`` maps names to 2D :mod:`simgeometry` shapes (a
+    ``absorbing_objects`` maps names to 2D `simgeometry` shapes (a
     ``Circle``, ``Polygon``, ``Aperture2D``, ...). A particle that ends a drift
     inside one is removed the same way and recorded under its name; an
     inverted shape absorbs everything outside it, such as a round chamber
@@ -149,14 +254,14 @@ class ElectrostaticSimulation:
     new position: with ``B_z`` it lies within ``|v| dt theta / 8`` of the
     gyration arc, ``theta`` the gyration angle per step. Like walls,
     objects do not change the field: for electrodes, pair them with
-    :class:`tree_d_3d.BoundaryIntegralElectrodes`.
+    `tree_d_3d.BoundaryIntegralElectrodes`.
 
     ``kernel="log"`` makes every particle an infinite line charge per unit
     length along z, the interaction of 2D Cartesian PIC, instead of a point
     charge in the plane. Its pair energy is ``-2 k_e q_i q_j ln(r / r_0)``
     with ``r_0 = reference_radius``, which shifts the potential energy but
     not the forces. Line charges add ``method="fmm"``, the O(N) fast
-    multipole method of :meth:`FlatQuadtree.fmm`, which ``"auto"`` selects
+    multipole method of `FlatQuadtree.fmm`, which ``"auto"`` selects
     above ``direct_threshold``. ``order`` is the number of expansion terms
     for line charges; ``leaf_capacity`` defaults to 32 for the FMM and 8
     otherwise.
@@ -604,13 +709,28 @@ class ElectrostaticSimulation:
         )
         return self._tree
 
+    @method(
+        equations={
+            "half_kick": r"\mathbf v^- = \mathbf v^n + \frac{\Delta t}{2m}\, q\mathbf E^n, \qquad \mathbf v^{n+1} = \mathbf v^+ + \frac{\Delta t}{2m}\, q\mathbf E^{n+1}",
+            "drift": r"\mathbf r^{n+1} = \mathbf r^n + \Delta t\left[\frac{\sin\alpha}{\alpha}\, \mathbf v^- + \frac{1 - \cos\alpha}{\alpha}\, (v^-_y, -v^-_x)\right], \qquad \alpha = \frac{q}{m} B_z \Delta t",
+            "rotation": r"\mathbf v^+ = R(-\alpha)\, \mathbf v^- = \big(v^-_x\cos\alpha + v^-_y\sin\alpha,\ v^-_y\cos\alpha - v^-_x\sin\alpha\big)",
+        },
+        order=2,
+        assumptions=(
+            r"the drift is the exact solution of $\dot{\mathbf v} = (qB_z/m)(v_y, -v_x)$ over $\Delta t$ and its time integral, written with $\operatorname{sinc}\alpha$ and $\frac{\alpha}{2}\operatorname{sinc}^2\frac{\alpha}{2}$ so the $B_z \to 0$ limit is exact: velocity Verlet at $B_z = 0$",
+            r"explicit: $\Delta t$ must resolve close encounters and the plasma period; the magnetic rotation is exact for any $\alpha$",
+            r"one field evaluation per step (cached); particles are absorbed after the drift, before the end-of-step fields",
+        ),
+        symbolic=_drift_rules,
+        problem=_orbit_problem,
+    )
     @sp.profile("tree_d_3d.simulation.step", tags=_PROFILE_TAGS)
     def step(self, dt: float | None = None) -> FlatQuadtree | None:
         """Electric half-kick, exact cyclotron drift, electric half-kick.
 
         Returns the tree used for the end-of-step forces, or None when the
         fields were summed directly. Forces on fixed particles are not
-        evaluated here and read as zero; call :meth:`compute_fields` for them.
+        evaluated here and read as zero; call `compute_fields` for them.
         """
         self.dt = _finite("dt", self.dt if dt is None else dt, positive=True)
         self.compute_fields(include_fixed=False)
@@ -645,6 +765,18 @@ class ElectrostaticSimulation:
     def get_kinetic_energy(self) -> float:
         return float(0.5 * np.sum(self.masses * np.sum(self.velocities**2, axis=0)))
 
+    @method(
+        equations={
+            "field_energy": r"U = \frac12\sum_i q_i \phi_i \qquad \text{(the field evaluation of the forces)}",
+            "coulomb_pairs": r"U = k_e \sum_{i<j} \frac{q_i q_j}{\sqrt{r_{ij}^2 + \varepsilon^2}}",
+            "log_pairs": r"U = -k_e \sum_{i<j} q_i q_j \ln\frac{r_{ij}^2 + \varepsilon^2}{r_0^2}",
+        },
+        assumptions=(
+            r"without the self-energy; `exact=True` sums all pairs, $O(N^2)$; otherwise exact for direct sums and accurate to the tree error",
+            r"$r_0$ = `reference_radius` shifts the log energy, not the forces",
+        ),
+        symbolic=_pair_energy_rules,
+    )
     def get_potential_energy(self, exact: bool = False) -> float:
         """Pair energy for the force kernel, excluding self-energy.
 

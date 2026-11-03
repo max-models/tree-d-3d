@@ -2,8 +2,8 @@
 
 ``fmm_downward_cuda.cu`` next to this file is the CUDA version (GPU) and ``fmm_downward_numpy.py`` the
 version for machines without Pyccel, all with the same arguments; the folder's
-``__init__.py`` declares the kernel (see :mod:`tree_d_3d.kernels`). The flat
-quadtree is described in :mod:`tree_d_3d.flat_tree`.
+``__init__.py`` declares the kernel (see `tree_d_3d.kernels`). The flat
+quadtree is described in `tree_d_3d.flat_tree`.
 """
 
 # ruff: noqa: F821 -- "int64[:]" annotations are Pyccel types, not Python names.

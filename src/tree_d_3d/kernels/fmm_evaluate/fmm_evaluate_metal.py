@@ -2,10 +2,10 @@
 
 ``fmm_evaluate_pyccel.py`` next to this file is the CPU version with the same
 arguments. One thread per leaf (far field) and per pair (exact near field) adds into
-zeroed atomic float32 delta arrays (see :meth:`~cunumpy.kernels.KernelPackage.metal_kernel` with ``atomic_outputs=True``); the host
+zeroed atomic float32 delta arrays (see `cunumpy.kernels.KernelPackage.metal_kernel` with ``atomic_outputs=True``); the host
 adds those to ``phi`` and ``field`` in float64. An unsoftened coincident charge sets
 ``status[0]`` to a failing particle + 1 (the first failing thread's; the other
-threads still run). See :mod:`tree_d_3d.kernels._metal` for the float32 caveats.
+threads still run). See `tree_d_3d.kernels._metal` for the float32 caveats.
 """
 
 from __future__ import annotations

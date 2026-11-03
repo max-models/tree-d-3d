@@ -2,7 +2,7 @@
 
 ``fmm_m2l_pyccel.py`` next to this file is the CPU version with the same arguments.
 One thread per pair adds into zeroed atomic float32 delta arrays (see
-:meth:`~cunumpy.kernels.KernelPackage.metal_kernel` with ``atomic_outputs=True``); the host adds those to the local expansions in
+`cunumpy.kernels.KernelPackage.metal_kernel` with ``atomic_outputs=True``); the host adds those to the local expansions in
 float64. The shifts sum alternating terms with binomials up to about C(2p, p), so in
 float32 the accuracy degrades with the order p (about 1e-4 relative at p = 12); the
 per-thread scratch holds orders up to ``TREE_D_3D_MAX_ORDER`` = 64, as on CUDA. The

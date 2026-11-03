@@ -1,7 +1,7 @@
 """The scope-profiler tag of the library's profiling regions.
 
 Every region is named ``"tree_d_3d.<module>.<operation>"`` and tagged with
-:data:`PROFILE_TAG`, which :mod:`tree_d_3d` registers as opt-in: the regions record
+`PROFILE_TAG`, which `tree_d_3d` registers as opt-in: the regions record
 nothing unless the application enables the tag, for example with
 ``scope_profiler.setup(enable_tags=["tree_d_3d"])``.
 """

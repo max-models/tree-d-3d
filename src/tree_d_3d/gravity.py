@@ -1,8 +1,8 @@
 """Barnes-Hut N-body solver for fast gravitational force calculations.
 
 This module implements the Barnes-Hut algorithm for O(N log N) computation of
-gravitational forces in N-body simulations. It uses quadtree (2D) or octree
-(3D) spatial decomposition to approximate distant bodies.
+gravitational forces in N-body simulations. It uses a quadtree (2D) spatial
+decomposition to approximate distant bodies by their centre of mass.
 
 References:
     Barnes, J., & Hut, P. (1986). A hierarchical O(N log N) force-calculation
@@ -15,6 +15,7 @@ from collections.abc import Sequence
 from math import sqrt
 
 import numpy as np
+from methodcard import method
 
 from tree_d_3d.quad import Quad
 
@@ -95,6 +96,20 @@ class Node:
         )
 
 
+@method(
+    equations={
+        "force": r"\mathbf F_i = \sum_j \frac{G m_i m_j\, (\mathbf r_j - \mathbf r_i)}{\left(|\mathbf r_j - \mathbf r_i|^2 + \varepsilon^2\right)^{3/2}}",
+        "monopole": r"\mathbf F_i \mathrel{+}= \frac{G m_i M\, (\mathbf r_\mathrm{cm} - \mathbf r_i)}{\rho^3}, \qquad \rho = \sqrt{|\mathbf r_\mathrm{cm} - \mathbf r_i|^2 + \varepsilon^2}, \qquad \text{if } s/\rho < \theta",
+    },
+    assumptions=(
+        r"an object quadtree, one body per leaf, inserted one at a time; $s$ the cell side, $\rho$ the softened distance to the centre of mass",
+        r"monopole only; no rule opens the cell containing the body; coincident bodies are not handled",
+        r"a reference and teaching code, not used by the electrostatic solvers",
+    ),
+    references=(
+        "[Barnes and Hut, Nature 324, 446 (1986)](https://doi.org/10.1038/324446a0)",
+    ),
+)
 class BarnesHutTree:
     """Quadtree-based Barnes-Hut N-body tree."""
 
@@ -272,6 +287,18 @@ class BarnesHutTree:
         return nodes
 
 
+@method(
+    equations={
+        "kick": r"\mathbf v^{n+1/2} = \mathbf v^n + \frac{\Delta t}{2}\frac{\mathbf F(\mathbf r^n)}{m}, \qquad \mathbf v^{n+1} = \mathbf v^{n+1/2} + \frac{\Delta t}{2}\frac{\mathbf F(\mathbf r^{n+1})}{m}",
+        "drift": r"\mathbf r^{n+1} = \mathbf r^n + \Delta t\, \mathbf v^{n+1/2}",
+    },
+    order=2,
+    assumptions=(
+        r"kick-drift-kick leapfrog; the tree is rebuilt and all forces summed twice per step",
+        r"bodies outside the fixed `bounds` are left out of the tree: they feel forces but exert none",
+    ),
+    components=(BarnesHutTree,),
+)
 class BarnesHutSimulation:
     """N-body simulation using Barnes-Hut algorithm.
 

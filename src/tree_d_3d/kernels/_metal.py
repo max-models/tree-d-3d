@@ -1,11 +1,11 @@
 """Helpers of the Metal versions (``<name>/<name>_metal.py``) of the kernels.
 
 A Metal version is the body of a Metal Shading Language kernel built by
-:meth:`KERNEL_PACKAGE.metal_kernel <cunumpy.kernels.KernelPackage.metal_kernel>` and run on the GPU of an Apple-silicon Mac, wrapped in
+`KERNEL_PACKAGE.metal_kernel <cunumpy.kernels.KernelPackage.metal_kernel>` and run on the GPU of an Apple-silicon Mac, wrapped in
 a function with the arguments of the Pyccel version: NumPy arrays in, results
 written into the output arrays. The GPU has no float64, so the kernels compute in
 float32 (``float64="cast"``): expect a relative error of about 1e-5 against the
-CPU versions. Import a version only where :func:`cunumpy.kernels.metal_available` is true.
+CPU versions. Import a version only where `cunumpy.kernels.metal_available` is true.
 """
 
 from __future__ import annotations

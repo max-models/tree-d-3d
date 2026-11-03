@@ -1,7 +1,7 @@
 """The Metal version (Apple-silicon GPU, float32) of the ``direct_log_sum`` kernel.
 
 ``direct_log_sum_pyccel.py`` next to this file is the CPU version with the same
-arguments. One thread per target; see :mod:`tree_d_3d.kernels._metal`.
+arguments. One thread per target; see `tree_d_3d.kernels._metal`.
 """
 
 from __future__ import annotations

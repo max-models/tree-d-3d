@@ -1,0 +1,92 @@
+---
+title: Overview
+description: The equations of tree-d-3d, from the interaction kernels and the tree expansions to the pusher, the grounded strip and the electrodes, and what the model leaves out.
+sidebar:
+  label: Overview
+---
+
+import MethodCard from '@max-models/starlight-theme/components/MethodCard.astro';
+
+tree-d-3d computes the electrostatic field of N charges in a plane, in free space, and moves
+the charges in it, with an optional uniform magnetic field $B_z$. Nothing is put on a mesh: the
+field is a sum over the charges, made fast by a Barnes-Hut tree walk or, for line charges, a
+fast multipole method, and conductors enter as charged panels on their surfaces. Two
+interaction kernels, chosen per tree with `kernel=`:
+
+- `"coulomb"`: point charges with the 3D Coulomb interaction, confined to the plane;
+- `"log"`: infinite line charges along $z$, the Green's function of 2D Poisson (2D Cartesian
+  PIC).
+
+Each equation on these pages is declared on the code that implements it, as a method card, and
+checked by the tests: eighteen closed forms against SymPy rules, five discretisations against
+their order of convergence. The pages of the section list the cards module by module; this one
+shows how they fit together.
+
+## The pipeline
+
+1. **[Kernels](/tree-d-3d/numerics/flat-tree/).** The exact softened sums of both kernels,
+   $\phi = \sum_j q_j/\sqrt{r^2 + \varepsilon^2}$ and
+   $\phi = -\sum_j q_j \ln(r^2 + \varepsilon^2)$, define the model; `direct_field` evaluates
+   them in $O(NM)$.
+2. **[Tree walk](/tree-d-3d/numerics/flat-tree/).** A quadtree, built level by level, carries
+   the moments of every cell about its centre. The walk replaces a cell that looks small enough
+   from the target by its expansion, through the quadrupole for point charges and to order $p$
+   in complex form for line charges, in $O(\log N)$ per target:
+
+<MethodCard name="tree_d_3d.flat_tree.FlatQuadtree.evaluate" headingLevel={3} />
+
+3. **[Fast multipole method](/tree-d-3d/numerics/flat-tree/)** for line charges: a dual-tree
+   traversal pairs well-separated cells, whose multipoles become local expansions (M2L),
+   shifted down the tree (L2L) and evaluated at the particles (L2P), in $O(N)$:
+
+<MethodCard name="tree_d_3d.flat_tree.FlatQuadtree.fmm" headingLevel={3} />
+
+4. **[Macroparticles](/tree-d-3d/numerics/bodies/)** carry a weight on mass and charge, so
+   $q/m$ is kept.
+5. **[Particle pusher](/tree-d-3d/numerics/simulation/):** an electric half-kick, the exact
+   gyration in $B_z$ over the step, another half-kick; second order, velocity Verlet at
+   $B_z = 0$. Absorbing walls and `simgeometry` objects remove the particles that cross them.
+6. **Boundaries.** Two grounded plates by a [conformal map](/tree-d-3d/numerics/strip/) of the
+   strip onto the half-plane, where one image per charge makes the plates equipotentials, and
+   conductors at prescribed potentials by the
+   [boundary-integral (panel) method](/tree-d-3d/numerics/electrodes/): an induced line-charge
+   density on each surface, piecewise constant on straight panels, collocated at their
+   midpoints. The free charges of a meshless space-charge model (a gun, a beam) enter both as
+   sources.
+
+The [reference tree](/tree-d-3d/numerics/reference/) is the walk of step 2 as a readable
+object tree. Two codes stand beside the pipeline: the
+[smooth-membership FMM](/tree-d-3d/numerics/smooth/), a NumPy prototype whose forces are the
+exact gradient of a smooth energy, and the classic gravitational
+[Barnes-Hut code](/tree-d-3d/numerics/gravity/).
+
+## Units and conventions
+
+The kernels return raw potentials and fields; the callers multiply by
+$k_e = 1/(4\pi\varepsilon_0)$ (`K_E`) or by the `k_e` they are given, so SI inputs give SI
+outputs. Line charges are per unit length (C/m), and their potential is defined up to a
+constant: `reference_radius` $r_0$ makes it $-2k_e q \ln(r/r_0)$. Complex notation
+$z = x + iy$, with $E_x - iE_y$ the conjugate field. Per-particle arrays with a component axis
+are component-major, $(2, N)$.
+
+## Not in the model
+
+- No 3D geometry or octree yet: positions, fields and trees are planar.
+- No FMM for the Coulomb kernel, no Coulomb multipoles beyond the quadrupole, no M2M (moments
+  are summed per node), no error estimate or automatic choice of $\theta$ and $p$.
+- Softening only in the direct pairs: the far cells of the log tree and the FMM are
+  unsoftened (the smooth-membership FMM has a compact softening with an exact far field).
+- No periodic boundaries, dielectrics or Neumann conditions; no conductor at infinity; the
+  electrode system is solved directly (no FMM-accelerated GMRES); no electrodes inside
+  `ElectrostaticSimulation` (pair it with `BoundaryIntegralElectrodes` by hand).
+- No magnetic self-fields, induction, time-dependent or non-uniform $B$; no relativity,
+  radiation, collisions or emission in the library (the examples add some of them).
+
+## Verification
+
+Besides the checks of the cards, the tests compare the flat tree with the reference tree node
+for node, every compiled kernel with its Python source and its NumPy, CUDA (emulated) and Metal
+versions, the walk and the FMM with the direct sum against $\theta$ and $p$, the exact cyclotron
+orbit, energy and momentum over many steps, a self-similarly expanding disk of line charges,
+the grounded circle, the cylindrical capacitor and an L-shaped conductor against their closed
+forms, and the strip against charged sheets.

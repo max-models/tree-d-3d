@@ -14,6 +14,22 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- A Numerics section in the docs (header and sidebar): an overview of the model's equations
+  (`docs/src/content/docs/numerics/index.mdx`, with the main cards) and one page per module,
+  from the trees to the solvers built on them (starlight-theme's `methodcard: { pages: true }`).
+- Method cards (methodcard) on the equations of the package: the direct sums of both kernels,
+  the tree and its moments, the Barnes-Hut walk with the Coulomb and log expansions, the FMM
+  (traversal, M2L, L2L, L2P, P2P), the reference radius, macroparticles, the pusher with the
+  exact gyration and the pair energies, the grounded strip with its self term, image force and
+  softening correction, the uniformly charged segment, the boundary-integral electrodes and
+  their tabulated field, the smooth-membership FMM and the gravitational Barnes-Hut code, with
+  their assumptions and references. `test_method_cards.py` checks them: SymPy rules for the
+  closed forms (the kernels, the moments and expansions, the strip's Green's function and image
+  force, the segment integral, the compact softening, the gyration drift, the pair energies),
+  the observed order of the tree walk and the FMM against the size of the cells' charges, of
+  the electrodes against the panel length, of the tabulated field and of the pusher, and the
+  cards of the docs against those of the code. Adds the `methodcard` dependency.
+
 - Opt-in scope-profiler regions (`tree_d_3d.<module>.<operation>`) around the tree build,
   moments, tree walk, FMM, direct sum, simulation step and field evaluation, electrode
   factorisation, solve and panel field, and the grounded-strip field. They record nothing
@@ -65,6 +81,14 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `circle_vertices`: use `conductors_from_shape(Circle(...), ...)`.
 
 ### Fixed
+
+- The math in the docstrings renders on the API pages: `$$` blocks instead of indented text,
+  and code spans instead of `:func:` roles. The docstrings of `flat_tree` (it has the log
+  kernel too), `electrodes` (far panels are two Gauss-Legendre point charges), `gravity` (no
+  octree), `FlatQuadtree.fmm` and `fmm_traverse` (P2P pairs need not touch),
+  `ElectrostaticSimulation` (`"auto"` sums directly without the compiled kernels) and
+  `ReferenceQuadtree.field_at` (an `exclude` away from the probe makes the sum exact) say what
+  the code does.
 
 - `conductors_from_shape` keeps an open curve (a simgeometry `Polyline`) an open conductor
   instead of closing it.

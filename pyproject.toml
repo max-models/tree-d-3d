@@ -22,6 +22,7 @@ classifiers = [
 ]
 dependencies = [
   "cunumpy>=0.7.1",
+  "methodcard",
   "numpy",
   "pyccel>2.0",
   "scipy",
@@ -50,7 +51,7 @@ optional-dependencies.docs = [
 ]
 optional-dependencies.gpu = [ "cupy-cuda12x" ]
 optional-dependencies.metal = [ "mlx; sys_platform == 'darwin' and platform_machine == 'arm64'" ]
-optional-dependencies.test = [ "pytest", "pytest-cov", "tree-d-3d[examples]" ]
+optional-dependencies.test = [ "methodcard[symbolic]", "pytest", "pytest-cov", "tree-d-3d[examples]" ]
 urls."Source" = "https://github.com/max-models/tree-d-3d"
 
 [project.entry-points."scope_profiler.opt_in_tags"]
@@ -95,6 +96,7 @@ typeCheckingMode = "standard"
 pythonpath = [ "src" ]
 testpaths = [ "src" ]
 addopts = "-ra"
+markers = [ "convergence: an order-of-accuracy test of a method card" ]
 
 [tool.coverage.run]
 source = [ "tree_d_3d" ]
@@ -107,6 +109,7 @@ show_missing = true
 # uv.lock); PRs to main and the release use PyPI only (CI sets UV_NO_SOURCES).
 [tool.uv.sources]
 cunumpy = { git = "https://github.com/max-models/cunumpy", branch = "devel" }
+methodcard = { git = "https://github.com/max-models/methodcard", branch = "devel" }
 plasma-plots = { git = "https://github.com/max-models/plasma-plots", branch = "devel" }
 plasmacoll = { git = "https://github.com/max-models/plasmacoll", branch = "devel" }
 scope-profiler = { git = "https://github.com/max-models/scope-profiler", branch = "devel" }
