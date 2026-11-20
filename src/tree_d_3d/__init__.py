@@ -13,7 +13,8 @@ The particles move in a plane for now; full 3D, on an octree, is planned.
   conformal mapping and the FMM.
 * `BoundaryIntegralElectrodes`: conductors at prescribed potentials, by the
   single-layer boundary-integral (panel) method, with `conductors_from_shape`
-  panelling any 2D `simgeometry` shape.
+  panelling any 2D `simgeometry` shape, in free space, periodic along y
+  (`periodic_log_kernel`) or beside a Neumann or Dirichlet `Face`.
 * `tree_d_3d.gravity`: the classic gravitational Barnes-Hut N-body code.
 
 The compiled kernels are in `tree_d_3d.kernels`.
@@ -31,8 +32,10 @@ from tree_d_3d.constants import K_E
 from tree_d_3d.electrodes import (
     BoundaryIntegralElectrodes,
     Conductor,
+    Face,
     TabulatedField,
     conductors_from_shape,
+    periodic_log_kernel,
     segment_field,
 )
 from tree_d_3d.flat_tree import FlatNode, FlatQuadtree, direct_field
@@ -54,6 +57,7 @@ __all__ = [
     "ChargedBody",
     "Conductor",
     "ElectrostaticSimulation",
+    "Face",
     "FlatNode",
     "FlatQuadtree",
     "GroundedStripField",
@@ -64,5 +68,6 @@ __all__ = [
     "conductors_from_shape",
     "direct_field",
     "kernels_compiled",
+    "periodic_log_kernel",
     "segment_field",
 ]

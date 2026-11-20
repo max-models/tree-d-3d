@@ -18,6 +18,10 @@ about a tenth of the source scale next to a panel and the method converges at fi
 order; with it the boundary is an equipotential to within the piecewise-constant charge
 density's own error.
 
+A period along y (`periodic_log_kernel`: a row of line charges in closed form) and a
+plane domain face (`Face`, Neumann or Dirichlet, by mirror images) take the place of the
+stacked and mirrored copies of the electrodes an extraction cell would otherwise need.
+
 Panel counts here are the hundreds to low thousands the validation examples need, so the
 system is solved directly, by an LU factorisation done once per geometry and reused by
 every `BoundaryIntegralElectrodes.solve`; the note's plan of an FMM-accelerated
@@ -138,10 +142,129 @@ def segment_field(points, start, end) -> tuple[np.ndarray, np.ndarray]:
 
 
 def _point_field(points, sources) -> tuple[np.ndarray, np.ndarray]:
-    """The point line-charge kernel, pairwise: ``-2 ln r`` and ``2 d / r**2``."""
+    """The point line-charge kernel, pairwise: ``-2 ln r`` and ``2 d / r**2``.
+
+    Zero for coincident pairs, which the far sums leave out.
+    """
     d = points - sources
     r2 = np.sum(d * d, axis=0)
-    return -np.log(r2), 2.0 * d / r2
+    at = r2 == 0.0
+    r2 = np.where(at, 1.0, r2)
+    return np.where(at, 0.0, -np.log(r2)), np.where(at, 0.0, 2.0 * d / r2)
+
+
+#: Above this ``2 pi |x| / period`` the periodic kernel takes its exponential asymptote.
+_PERIODIC_ASYMPTOTE = 30.0
+#: Rows of the pairwise arrays held at once by the periodic sums.
+_PAIRS_PER_CHUNK = 2_000_000
+
+
+def _periodic_rules() -> dict:
+    """The SymPy rules of `periodic_log_kernel`: the closed form and minus its gradient."""
+    import sympy
+
+    x, y = sympy.symbols("x y", real=True)
+    period = sympy.Integer(2)
+    k = 2 * sympy.pi / period
+    phi = -sympy.log(2 * (sympy.cosh(k * x) - sympy.cos(k * y))) + 2 * sympy.log(k)
+    ranges = {"x": (-3.0, 3.0), "y": (0.05, 0.95)}
+
+    def component(index: int):
+        def call(x, y):
+            phi, field = periodic_log_kernel(np.array([[x], [y]]), float(period))
+            return float(phi[0]) if index < 0 else float(field[index, 0])
+
+        return call
+
+    return {
+        "potential": Rule(phi, component(-1), ranges),
+        "field_x": Rule(-sympy.diff(phi, x), component(0), ranges),
+        "field_y": Rule(-sympy.diff(phi, y), component(1), ranges),
+    }
+
+
+@method(
+    equations={
+        "potential": r"G_P(\mathbf d) = \sum_{m=-\infty}^{\infty} -\ln|\mathbf d - m P \hat{\mathbf y}|^2 = -\ln\Big[2\Big(\cosh\frac{2\pi d_x}{P} - \cos\frac{2\pi d_y}{P}\Big)\Big] + 2\ln\frac{2\pi}{P}",
+        "field_x": r"-\partial_x G_P = \frac{2\pi}{P}\,\frac{\sinh(2\pi d_x/P)}{\cosh(2\pi d_x/P) - \cos(2\pi d_y/P)}",
+        "field_y": r"-\partial_y G_P = \frac{2\pi}{P}\,\frac{\sin(2\pi d_y/P)}{\cosh(2\pi d_x/P) - \cos(2\pi d_y/P)}",
+        "stable": r"\cosh a - \cos b = 2\sinh^2\frac a2 + 2\sin^2\frac b2",
+    },
+    assumptions=(
+        r"a row of unit line charges a period $P$ apart along $y$, in the log kernel, without $k_e$; the divergent sum is renormalised so that $G_P + \ln|\mathbf d|^2 \to 0$ as $\mathbf d \to 0$",
+        r"far from the row ($|d_x| \gg P$) $G_P \to -2\pi|d_x|/P + 2\ln(2\pi/P)$: the potential of a charged sheet, $2\pi/P$ per unit charge on either side",
+        r"$\cosh a - \cos b$ is evaluated as $2\sinh^2(a/2) + 2\sin^2(b/2)$ (no cancellation near a charge) and by its exponential asymptote above $|a| = 30$",
+    ),
+    symbolic=_periodic_rules,
+)
+def periodic_log_kernel(d, period: float) -> tuple[np.ndarray, np.ndarray]:
+    """Potential ``(K,)`` and field ``(2, K)`` of a row of unit line charges, period ``period`` along y.
+
+    ``d`` ``(2, K)`` are the targets relative to one charge of the row; the others sit
+    at ``d = (0, m period)``. In the log kernel of `tree_d_3d.direct_field`, without
+    ``k_e``, the sum of ``-ln r**2`` over the row is renormalised to
+
+    ``G = -ln(2 (cosh(2 pi x / P) - cos(2 pi y / P))) + 2 ln(2 pi / P)``,
+
+    which approaches the single charge's ``-ln r**2`` next to it. The field is
+    ``-grad G``. At a charge itself the potential is infinite.
+    """
+    d = np.asarray(d, dtype=float)
+    k = 2.0 * np.pi / float(period)
+    a = k * d[0]
+    b = k * d[1]
+    large = np.abs(a) > _PERIODIC_ASYMPTOTE
+    near_a = np.where(large, 0.0, a)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        # cosh a - cos b without cancellation near a charge
+        c = 2.0 * np.sinh(0.5 * near_a) ** 2 + 2.0 * np.sin(0.5 * b) ** 2
+        e = np.exp(-np.abs(np.where(large, a, 0.0)))
+        tail = 1.0 - 2.0 * np.cos(b) * e + e * e
+        log_c = np.where(
+            large,
+            np.abs(a) - np.log(2.0) + np.log(np.where(large, tail, 1.0)),
+            np.log(c),
+        )
+        phi = -np.log(2.0) - log_c + 2.0 * np.log(k)
+        ex = np.where(large, np.sign(a) * (1.0 - e * e) / tail, np.sinh(near_a) / c)
+        ey = np.where(large, 2.0 * np.sin(b) * e / tail, np.sin(b) / c)
+    return phi, k * np.stack((ex, ey))
+
+
+@dataclass(frozen=True)
+class Face:
+    """A plane domain face, ``x = position`` (``axis="x"``) or ``y = position``.
+
+    ``kind="neumann"``: no normal field on the face (a symmetry plane); every charge,
+    induced or free, has a mirror image of the same sign. ``kind="dirichlet"``: the
+    face is held at ``potential``; the images carry the opposite sign. Only the side
+    of the face holding the conductors is physical.
+    """
+
+    axis: str
+    position: float
+    kind: str = "neumann"
+    potential: float = 0.0
+
+    def __post_init__(self) -> None:
+        if self.axis not in ("x", "y"):
+            raise ValueError(f"a face's axis is 'x' or 'y', not {self.axis!r}")
+        if self.kind not in ("neumann", "dirichlet"):
+            raise ValueError(f"a face is 'neumann' or 'dirichlet', not {self.kind!r}")
+        if self.kind == "neumann" and self.potential != 0.0:
+            raise ValueError("a Neumann face has no potential")
+
+    @property
+    def sign(self) -> float:
+        """The sign of the image charges: +1 for Neumann, -1 for Dirichlet."""
+        return 1.0 if self.kind == "neumann" else -1.0
+
+    def mirror(self, points: np.ndarray) -> np.ndarray:
+        """``points`` ``(2, n)`` mirrored about the face."""
+        axis = 0 if self.axis == "x" else 1
+        mirrored = np.array(points, dtype=float, copy=True)
+        mirrored[axis] = 2.0 * self.position - mirrored[axis]
+        return mirrored
 
 
 def _table_problem() -> ConvergenceProblem:
@@ -319,6 +442,7 @@ def _grounded_circle_problem() -> ConvergenceProblem:
         "panels": r"S_{ik} = \begin{cases} \phi_\mathrm{seg}(\mathbf m_i;\, k) & |\mathbf m_i - \mathbf m_k| < n_\mathrm{near} L_k \\ -\sum_{g=1}^{G} w_g \ln|\mathbf m_i - \mathbf y_{k,g}|^2 & \text{otherwise} \end{cases}",
         "far_points": r"\mathbf y_{k,g} = \mathbf a_k + \xi_g (\mathbf b_k - \mathbf a_k), \qquad \xi_g = \frac{x_g + 1}{2}, \quad w_g = \frac{\omega_g}{2}, \qquad \text{error } O\big((L/r)^{2G}\big)",
         "field": r"\phi(\mathbf x) = k_e\Big[\sum_{k\ \mathrm{near}} Q_k\, \phi_\mathrm{seg}(\mathbf x; k) + \sum_{k\ \mathrm{far}} \sum_g Q_k w_g\, \phi_\mathrm{pt}(\mathbf x - \mathbf y_{k,g}) - \sum_j q_j \ln|\mathbf x - \mathbf r_j|^2\Big]",
+        "images": r"\phi_\mathrm{pt}(\mathbf x - \mathbf y) \to \sum_{\iota \in \{1, \mathsf M\}} s_\iota\, G_P(\mathbf x - \iota\,\mathbf y), \qquad s_{\mathsf M} = \pm 1 \text{ (Neumann, Dirichlet)}, \qquad \phi \to \phi + V_\mathrm{face}",
     },
     order={"potential": 2, "force": 2},
     assumptions=(
@@ -327,8 +451,13 @@ def _grounded_circle_problem() -> ConvergenceProblem:
         r"$\mathsf S$ is dense and not symmetric: LU-factorised once, $O(P^3)$, and $O(P^2)$ per `solve`; no regularisation or preconditioning",
         r"no conductor at infinity and no constraint on the total charge: the reference length of the logarithm is the unit of length, and a lone conductor of logarithmic capacity 1 (a circle of radius 1) makes $\mathsf S$ singular",
         r"keep panels shorter than the gaps between surfaces; the order is in the panel length",
+        r"with a period $P$ along $y$ the point kernel is the row sum $G_P$ (`periodic_log_kernel`) and the near panel copies, shifted by $\pm P$, enter exactly; a face $\mathsf M$ mirrors every charge about it, and the conductors' potentials are measured from a Dirichlet face's $V_\mathrm{face}$",
     ),
-    components=(segment_field, "tree_d_3d.flat_tree.direct_field"),
+    components=(
+        segment_field,
+        periodic_log_kernel,
+        "tree_d_3d.flat_tree.direct_field",
+    ),
     problem=_grounded_circle_problem,
 )
 class BoundaryIntegralElectrodes:
@@ -345,52 +474,147 @@ class BoundaryIntegralElectrodes:
     ``far_points`` Gauss--Legendre point charges each, whose error falls as
     ``(L / r) ** (2 * far_points)``. ``near_field=0, far_points=1`` gives the plain
     midpoint rule.
+
+    ``period`` makes the geometry periodic along y: every charge, induced or free,
+    stands for a row of copies ``period`` apart, summed in closed form by
+    `periodic_log_kernel` (the panel copies near a target still enter exactly).
+    ``face`` adds a plane domain face (`Face`): a Neumann face mirrors every charge
+    with its sign, a Dirichlet face with the opposite sign and holds the face at its
+    potential. A face normal to x combines with a period; a second, parallel face
+    is a conductor, such as an open plate spanning one period at the face's
+    potential (an infinite plane under the period). The conductors must lie on one
+    side of the face, the physical one. With a period the potential far from the
+    conductors grows linearly in ``|x|`` unless the total charge per period
+    vanishes; a domain closed by conductors and faces is unaffected.
     """
 
-    def _near_pairs(self, points: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """Target and panel indices of the pairs closer than ``near_field`` panel lengths."""
+    def _near_pairs(
+        self, points: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """The pairs of targets and panel copies closer than ``near_field`` panel lengths.
+
+        A panel copy is an image (``0`` the panel itself, ``1`` its mirror in the
+        face) shifted by a whole number of periods along y (``0`` without a
+        period). Returns the target, panel and image indices and the y shift of
+        each pair.
+        """
         empty = np.zeros(0, dtype=np.int64)
         if not self.near_field or not points.shape[1]:
-            return empty, empty
+            return empty, empty, empty, np.zeros(0)
         radius = self.near_field * float(self.lengths.max())
-        pairs = KDTree(points.T).sparse_distance_matrix(
-            self._panel_tree, radius, output_type="ndarray"
+        found = []
+        for image, tree in enumerate(self._image_trees):
+            for shift in self._shifts:
+                shifted = points - np.array([[0.0], [shift]])
+                pairs = KDTree(shifted.T).sparse_distance_matrix(
+                    tree, radius, output_type="ndarray"
+                )
+                if not pairs.size:
+                    continue
+                target = pairs["i"].astype(np.int64)
+                panel = pairs["j"].astype(np.int64)
+                keep = pairs["v"] < self.near_field * self.lengths[panel]
+                found.append(
+                    (
+                        target[keep],
+                        panel[keep],
+                        np.full(int(keep.sum()), image),
+                        np.full(int(keep.sum()), shift),
+                    )
+                )
+        if not found:
+            return empty, empty, empty, np.zeros(0)
+        target, panel, image, shift = (np.concatenate(c) for c in zip(*found))
+        return target, panel, image, shift
+
+    def _near_correction(
+        self,
+        points: np.ndarray,
+        target: np.ndarray,
+        panel: np.ndarray,
+        image: np.ndarray,
+        shift: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Per pair and unit panel charge: the exact segment less the panel copy's point terms.
+
+        Point terms at zero distance are left out of the far sums (`_far_sum`), so
+        they are left out here too.
+        """
+        shifted = points[:, target] - np.stack((np.zeros_like(shift), shift))
+        phi, field = segment_field(
+            shifted,
+            self._image_starts[image, :, panel].T,
+            self._image_ends[image, :, panel].T,
         )
-        if not pairs.size:
-            return empty, empty
-        target = pairs["i"].astype(np.int64)
-        panel = pairs["j"].astype(np.int64)
-        distance = pairs["v"]
-        keep = distance < self.near_field * self.lengths[panel]
-        return target[keep], panel[keep]
+        k = self.far_points
+        for g in range(k):
+            node = self._image_nodes[image, :, panel * k + g].T
+            pt_phi, pt_field = _point_field(shifted, node)
+            phi = phi - self._weights[g] * pt_phi
+            field = field - self._weights[g] * pt_field
+        sign = self._image_signs[image]
+        return sign * phi, sign * field
+
+    def _pairwise_periodic(self, d: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """`periodic_log_kernel` on ``(2, M, N)`` separations, zero where they vanish."""
+        assert self.period is not None
+        shape = d.shape[1:]
+        flat = d.reshape(2, -1)
+        at = (flat[0] == 0.0) & (np.remainder(flat[1], self.period) == 0.0)
+        safe = np.where(at, 1.0, flat)
+        phi, field = periodic_log_kernel(safe, self.period)
+        phi = np.where(at, 0.0, phi)
+        field = np.where(at, 0.0, field)
+        return phi.reshape(shape), field.reshape((2, *shape))
+
+    def _pairwise_potential(self, points: np.ndarray, sources: np.ndarray):
+        """The ``(M, N)`` raw potentials of unit charges, zero for coincident pairs."""
+        if self.period is not None:
+            return self._pairwise_periodic(points[:, :, None] - sources[:, None, :])[0]
+        r2 = np.sum((points[:, :, None] - sources[:, None, :]) ** 2, axis=0)
+        with np.errstate(divide="ignore"):
+            return np.where(r2 > 0.0, -np.log(r2), 0.0)
 
     def _build_matrix(self) -> np.ndarray:
         """The dense ``S``: Gauss nodes for far pairs, exact segments for near ones."""
         k = self.far_points
         matrix = np.zeros((self.num_panels, self.num_panels))
-        with np.errstate(divide="ignore"):
+        for image, sign in enumerate(self._image_signs):
+            nodes = self._image_nodes[image]
             for g in range(k):
-                nodes = self._nodes[:, g::k]
-                diff = self.midpoints[:, :, None] - nodes[:, None, :]
-                # -2 ln r = -ln r^2, per unit panel charge
-                matrix -= self._weights[g] * np.log(np.sum(diff**2, axis=0))
-        target, panel = self._near_pairs(self.midpoints)
-        off = target != panel
-        target, panel = target[off], panel[off]
-        if target.size:
-            matrix[target, panel] = segment_field(
-                self.midpoints[:, target], self.starts[:, panel], self.ends[:, panel]
-            )[0]
-        # self term: the raw potential at a panel's own midpoint from its charge spread
-        # uniformly over its length L, integral_{-L/2}^{L/2} -2 ln|t| dt / L * L = ...
-        self_term = 2.0 * (1.0 - np.log(self.lengths / 2.0))
-        np.fill_diagonal(matrix, self_term)
+                matrix += (
+                    sign
+                    * self._weights[g]
+                    * self._pairwise_potential(self.midpoints, nodes[:, g::k])
+                )
+        target, panel, image, shift = self._near_pairs(self.midpoints)
+        # every panel's own segment, also with near_field = 0
+        own = (target == panel) & (image == 0) & (shift == 0.0)
+        index = np.arange(self.num_panels)
+        target = np.concatenate((target[~own], index))
+        panel = np.concatenate((panel[~own], index))
+        image = np.concatenate((image[~own], np.zeros_like(index)))
+        shift = np.concatenate((shift[~own], np.zeros(self.num_panels)))
+        correction, _ = self._near_correction(
+            self.midpoints, target, panel, image, shift
+        )
+        np.add.at(matrix, (target, panel), correction)
         return matrix
+
+    def _check_one_side(self, face: Face) -> None:
+        """Raise unless every conductor lies on one side of ``face`` (touching it is allowed)."""
+        axis = 0 if face.axis == "x" else 1
+        offset = np.concatenate((self.starts[axis], self.ends[axis])) - face.position
+        tolerance = 1e-12 * max(1.0, float(np.abs(offset).max()))
+        if np.any(offset > tolerance) and np.any(offset < -tolerance):
+            raise ValueError("the conductors must all lie on one side of the face")
 
     def __init__(
         self,
         conductors: Sequence[Conductor],
         *,
+        period: float | None = None,
+        face: Face | None = None,
         k_e: float = K_E,
         near_field: float = NEAR_FIELD,
         far_points: int = FAR_POINTS,
@@ -401,9 +625,17 @@ class BoundaryIntegralElectrodes:
             raise ValueError("near_field must be >= 0")
         if int(far_points) != far_points or far_points < 1:
             raise ValueError("far_points must be a positive integer")
+        if period is not None and not (np.isfinite(period) and period > 0):
+            raise ValueError("period must be positive and finite")
+        if period is not None and face is not None and face.axis == "y":
+            raise ValueError("a face normal to the periodic y axis is not supported")
         self.k_e = float(k_e)
         self.near_field = float(near_field)
         self.far_points = int(far_points)
+        #: the period along y, ``None`` in free space
+        self.period = None if period is None else float(period)
+        #: the domain face, mirroring every charge, or ``None``
+        self.face = face
         self.conductors = list(conductors)
         midpoints, lengths, group, target, starts, ends = [], [], [], [], [], []
         for i, c in enumerate(self.conductors):
@@ -433,7 +665,8 @@ class BoundaryIntegralElectrodes:
         #: the panel's conductor's potential, ``(num_panels,)``
         self.target_potential = np.concatenate(target)
         self.num_panels = self.midpoints.shape[1]
-        self._panel_tree = KDTree(self.midpoints.T)
+        if face is not None:
+            self._check_one_side(face)
         # far panels as far_points Gauss--Legendre point charges each, panel-major
         x, w = np.polynomial.legendre.leggauss(self.far_points)
         self._weights = 0.5 * w
@@ -443,7 +676,25 @@ class BoundaryIntegralElectrodes:
             + (self.ends - self.starts)[:, :, None] * along[None, None, :]
         ).reshape(2, -1)
         self._node_weights = np.tile(self._weights, self.num_panels)
-        self._node_tree = KDTree(self._nodes.T)
+        # the panels and their mirror image in the face; shifts by whole periods
+        images = [lambda points: points]
+        if face is not None:
+            images.append(face.mirror)
+        self._image_signs = np.array([1.0] + ([face.sign] if face else []))
+        self._image_starts = np.stack([mirror(self.starts) for mirror in images])
+        self._image_ends = np.stack([mirror(self.ends) for mirror in images])
+        self._image_nodes = np.stack([mirror(self._nodes) for mirror in images])
+        self._image_trees = [
+            KDTree((0.5 * (a + b)).T)
+            for a, b in zip(self._image_starts, self._image_ends)
+        ]
+        self._image_node_trees = [KDTree(nodes.T) for nodes in self._image_nodes]
+        self._panel_tree = self._image_trees[0]
+        self._shifts = (
+            (0.0,) if self.period is None else (-self.period, 0.0, self.period)
+        )
+        #: the potential the conductors' potentials are measured from: a Dirichlet face's
+        self.offset = face.potential if face is not None else 0.0
         with sp.region("tree_d_3d.electrodes.factorize", tags=_PROFILE_TAGS):
             self._matrix = self._build_matrix()
             self._lu = lu_factor(self._matrix)
@@ -452,53 +703,125 @@ class BoundaryIntegralElectrodes:
         self._source_positions = np.zeros((2, 0))
         self._source_charges = np.zeros(0)
 
+    def _periodic_sum(
+        self, points: np.ndarray, sources: np.ndarray, charges: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """`periodic_log_kernel` summed over ``sources``; coincident pairs give zero."""
+        m = points.shape[1]
+        phi = np.zeros(m)
+        field = np.zeros((2, m))
+        if not sources.shape[1]:
+            return phi, field
+        rows = max(1, _PAIRS_PER_CHUNK // sources.shape[1])
+        for first in range(0, m, rows):
+            block = slice(first, first + rows)
+            d = points[:, block, None] - sources[:, None, :]
+            pair_phi, pair_field = self._pairwise_periodic(d)
+            phi[block] = pair_phi @ charges
+            field[:, block] = pair_field @ charges
+        return phi, field
+
+    def _far_sum(
+        self,
+        points: np.ndarray,
+        sources: np.ndarray,
+        charges: np.ndarray,
+        image: int,
+        exclude: np.ndarray | None = None,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Raw potential and field at ``points`` of one image of point line charges.
+
+        Free space: `tree_d_3d.direct_field`, skipping ``exclude``; with a period,
+        `periodic_log_kernel` summed in chunks, where a target on a source keeps
+        only the other periods (the remainder, zero there).
+        """
+        sign = self._image_signs[image]
+        if image and self.face is not None:
+            sources = self.face.mirror(sources)
+        if self.period is None:
+            phi, field = direct_field(
+                points, sources, sign * charges, kernel="log", exclude=exclude
+            )
+            return np.array(phi), np.array(field)
+        return self._periodic_sum(points, sources, sign * charges)
+
+    def _node_exclude(self, points: np.ndarray, image: int) -> np.ndarray:
+        """Per target, a node of the image it sits on exactly (-1: none)."""
+        distance, nearest = self._image_node_trees[image].query(points.T)
+        return np.where(distance == 0.0, nearest, -1).astype(np.int64)
+
     @sp.profile("tree_d_3d.electrodes.panel_field", tags=_PROFILE_TAGS)
     def _panel_field(self, points: np.ndarray, charge: np.ndarray):
         """Raw potential and field at ``points`` from panels carrying ``charge``.
 
-        Far panels are summed fast as ``far_points`` Gauss--Legendre point charges each;
-        for the near pairs those point terms are taken back out (or excluded, for a
-        target exactly on a node, where they diverge) and the exact segment terms added.
+        Far panel copies are summed fast as ``far_points`` Gauss--Legendre point
+        charges each (all periods at once with a period); for the near copies those
+        point terms are taken back out and the exact segment terms added.
         """
-        k = self.far_points
-        node_charge = np.repeat(charge, k) * self._node_weights
-        # a target exactly on a node: leave that node out of the point sum
-        distance, nearest = self._node_tree.query(points.T)
-        exclude = np.where(distance == 0.0, nearest, -1).astype(np.int64)
-        target, panel = self._near_pairs(points)
-        # the near pairs' node terms, one row per pair and node
-        node = (panel[:, None] * k + np.arange(k)).ravel()
-        node_target = np.repeat(target, k)
-        on_node = node == exclude[node_target]
-        phi, e = direct_field(
-            points, self._nodes, node_charge, kernel="log", exclude=exclude
-        )
-        phi, e = np.array(phi), np.array(e)
+        node_charge = np.repeat(charge, self.far_points) * self._node_weights
+        m = points.shape[1]
+        phi = np.zeros(m)
+        e = np.zeros((2, m))
+        for image in range(len(self._image_signs)):
+            exclude = None if self.period else self._node_exclude(points, image)
+            p, f = self._far_sum(points, self._nodes, node_charge, image, exclude)
+            phi += p
+            e += f
+        target, panel, image, shift = self._near_pairs(points)
         if target.size:
-            seg_phi, seg_e = segment_field(
-                points[:, target], self.starts[:, panel], self.ends[:, panel]
+            pair_phi, pair_e = self._near_correction(
+                points, target, panel, image, shift
             )
-            off = ~on_node
-            pt_phi, pt_e = _point_field(
-                points[:, node_target[off]], self._nodes[:, node[off]]
-            )
-            m = points.shape[1]
             q = charge[panel]
-            qn = node_charge[node[off]]
-            phi += np.bincount(target, q * seg_phi, m)
-            phi -= np.bincount(node_target[off], qn * pt_phi, m)
+            phi += np.bincount(target, q * pair_phi, m)
             for axis in (0, 1):
-                e[axis] += np.bincount(target, q * seg_e[axis], m)
-                e[axis] -= np.bincount(node_target[off], qn * pt_e[axis], m)
+                e[axis] += np.bincount(target, q * pair_e[axis], m)
         return phi, e
+
+    def _source_sum(
+        self, points: np.ndarray, exclude_self: bool = False
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Raw potential and field at ``points`` of the free charges and their images."""
+        m = points.shape[1]
+        phi = np.zeros(m)
+        e = np.zeros((2, m))
+        if not self._source_charges.size:
+            return phi, e
+        for image in range(len(self._image_signs)):
+            exclude = (
+                np.arange(self._source_charges.size)
+                if exclude_self and image == 0
+                else None
+            )
+            p, f = self._far_sum(
+                points, self._source_positions, self._source_charges, image, exclude
+            )
+            phi += p
+            e += f
+        return phi, e
+
+    def _sources_alone(self, points: np.ndarray, exclude_self: bool = False):
+        """Raw potential and field of the free charges alone, in free space."""
+        if not self._source_charges.size:
+            return np.zeros(points.shape[1]), np.zeros((2, points.shape[1]))
+        exclude = np.arange(self._source_charges.size) if exclude_self else None
+        phi, e = direct_field(
+            points,
+            self._source_positions,
+            self._source_charges,
+            kernel="log",
+            exclude=exclude,
+        )
+        return np.array(phi), np.array(e)
 
     @sp.profile("tree_d_3d.electrodes.solve", tags=_PROFILE_TAGS)
     def solve(self, source_positions=None, source_charges=None) -> np.ndarray:
         """Solve for the panel charges that make every conductor an equipotential.
 
         ``source_positions`` ``(2, N)`` and ``source_charges`` ``(N,)`` are free line
-        charges (omit both for a pure capacitance problem). Returns and caches the
-        panel charges, used by `probe` and `force_on_sources`.
+        charges (omit both for a pure capacitance problem); with a period or a face
+        their images enter too. Returns and caches the panel charges, used by
+        `probe` and `force_on_sources`.
         """
         if source_positions is None:
             source_positions = np.zeros((2, 0))
@@ -507,16 +830,8 @@ class BoundaryIntegralElectrodes:
             2, -1
         )
         self._source_charges = np.asarray(source_charges, dtype=float).ravel()
-        if self._source_charges.size:
-            free_raw, _ = direct_field(
-                self.midpoints,
-                self._source_positions,
-                self._source_charges,
-                kernel="log",
-            )
-        else:
-            free_raw = np.zeros(self.num_panels)
-        rhs = self.target_potential / self.k_e - free_raw
+        free_raw, _ = self._source_sum(self.midpoints)
+        rhs = (self.target_potential - self.offset) / self.k_e - free_raw
         charge = lu_solve(self._lu, rhs)
         self.charge = charge
         return charge
@@ -524,33 +839,35 @@ class BoundaryIntegralElectrodes:
     def probe(self, points) -> tuple[np.ndarray, np.ndarray]:
         """Potential (V) and field (V/m, shape ``(2, M)``) at ``points`` ``(2, M)``.
 
-        Includes the solved panel charges and the free charges passed to `solve`;
-        ``points`` are probes, not sources, so no self term applies. Call `solve`
-        first.
+        Includes the solved panel charges and the free charges passed to `solve`,
+        with their images; ``points`` are probes, not sources, so no self term
+        applies. Call `solve` first.
         """
         if self.charge is None:
             raise RuntimeError("call solve() before probe()")
         points = np.asarray(points, dtype=float).reshape(2, -1)
         phi, e = self._panel_field(points, self.charge)
-        if self._source_charges.size:
-            phi_s, e_s = direct_field(
-                points, self._source_positions, self._source_charges, kernel="log"
-            )
-            phi, e = phi + phi_s, e + e_s
-        return self.k_e * phi, self.k_e * e
+        phi_s, e_s = self._source_sum(points)
+        return self.k_e * (phi + phi_s) + self.offset, self.k_e * (e + e_s)
 
     def panel_field(self, points) -> tuple[np.ndarray, np.ndarray]:
-        """Potential (V) and field (V/m) at ``points`` ``(2, M)`` of the panels alone.
+        """Potential (V) and field (V/m) at ``points`` ``(2, M)`` of all but the free charges.
 
-        The induced charge from the last `solve`, without the free charges passed
-        to it: for codes that add the free charges' field themselves (by a tree code,
-        say). Near panels enter exactly, as in `probe`.
+        The induced charge from the last `solve` and the images of the free charges
+        passed to it (with a period or a face), without the free charges themselves
+        in free space: for codes that add those by a tree code, say. Near panels
+        enter exactly, as in `probe`.
         """
         if self.charge is None:
             raise RuntimeError("call solve() before panel_field()")
         points = np.asarray(points, dtype=float).reshape(2, -1)
         phi, e = self._panel_field(points, self.charge)
-        return self.k_e * phi, self.k_e * e
+        phi_s, e_s = self._source_sum(points)
+        phi_a, e_a = self._sources_alone(points)
+        return (
+            self.k_e * (phi + phi_s - phi_a) + self.offset,
+            self.k_e * (e + e_s - e_a),
+        )
 
     def tabulate(self, lower, upper, shape) -> TabulatedField:
         """`probe` on a regular grid, for fast bilinear interpolation afterwards.
@@ -585,24 +902,16 @@ class BoundaryIntegralElectrodes:
     def force_on_sources(self) -> tuple[np.ndarray, np.ndarray]:
         """Potential and field (V/m, shape ``(2, N)``) at the free charges from everything else.
 
-        Excludes each source's own singular self-term, so multiplying the field by a
-        source's charge gives the physical force on it from the panels and the other
-        sources. Call `solve` first.
+        Excludes each source's own singular self-term, but not its images (with a
+        period or a face), so multiplying the field by a source's charge gives the
+        physical force on it from the panels, the other sources and the images.
+        Call `solve` first.
         """
         if self.charge is None:
             raise RuntimeError("call solve() before force_on_sources()")
-        n = self._source_charges.shape[0]
         phi_p, e_p = self._panel_field(self._source_positions, self.charge)
-        if n > 1:
-            phi_s, e_s = direct_field(
-                self._source_positions,
-                self._source_positions,
-                self._source_charges,
-                exclude=np.arange(n),
-                kernel="log",
-            )
-            phi_p, e_p = phi_p + phi_s, e_p + e_s
-        return self.k_e * phi_p, self.k_e * e_p
+        phi_s, e_s = self._source_sum(self._source_positions, exclude_self=True)
+        return self.k_e * (phi_p + phi_s) + self.offset, self.k_e * (e_p + e_s)
 
     def total_charge(self, conductor_index: int | None = None):
         """Induced charge of one conductor, or of every conductor if ``index`` is ``None``."""
