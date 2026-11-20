@@ -413,6 +413,7 @@ class FlatQuadtree:
 
     def _empty(self, root_quad: Quad) -> None:
         # Pyccel rejects zero-length arrays, so build the lone root here.
+        self._traversals: dict = {}
         self.perm = self._xp.empty(0, dtype=np.int64)
         self.node_count = 1
         self.node_center = self._xp.array(
@@ -556,6 +557,56 @@ class FlatQuadtree:
         self.levels = np.asarray(levels)
         return hi
 
+    def _moments(self) -> None:
+        """The cells' charges and multipole moments from ``self.charge``."""
+        count = self.node_count
+        kernel = self.kernel
+        with sp.region("tree_d_3d.flat_tree.moments", tags=_PROFILE_TAGS):
+            self.node_q = self._xp.empty(count)
+            self.node_qabs = self._xp.empty(count)
+            self.node_p = self._xp.empty((count, 2))
+            self.node_s = self._xp.empty((count, 3))
+            if kernel == "log":
+                self.moment_re = self._xp.empty((count, self.order + 1))
+                self.moment_im = self._xp.empty((count, self.order + 1))
+                self._kernels.log_quadtree_moments(
+                    self.pos,
+                    self.charge,
+                    self.perm,
+                    count,
+                    self.node_center,
+                    self.node_start,
+                    self.node_end,
+                    self.node_qabs,
+                    self.moment_re,
+                    self.moment_im,
+                    n_threads=count,
+                )
+                self.node_q[:] = self.moment_re[:, 0]
+                self.node_p[:, 0] = self.moment_re[:, 1]
+                self.node_p[:, 1] = self.moment_im[:, 1]
+                self._stack = self._xp.empty(
+                    3 * int(self.node_depth.max()) + 8, dtype=np.int64
+                )
+                return
+            self._kernels.quadtree_moments(
+                self.pos,
+                self.charge,
+                self.perm,
+                count,
+                self.node_center,
+                self.node_start,
+                self.node_end,
+                self.node_q,
+                self.node_qabs,
+                self.node_p,
+                self.node_s,
+                n_threads=count,
+            )
+            self._stack = self._xp.empty(
+                3 * int(self.node_depth.max()) + 8, dtype=np.int64
+            )
+
     def __init__(
         self,
         positions,
@@ -611,51 +662,23 @@ class FlatQuadtree:
             self.node_count = int(count)
             for name in _NODE_ARRAYS:
                 setattr(self, name, getattr(self, name)[:count].copy())
-        with sp.region("tree_d_3d.flat_tree.moments", tags=_PROFILE_TAGS):
-            self.node_q = self._xp.empty(count)
-            self.node_qabs = self._xp.empty(count)
-            self.node_p = self._xp.empty((count, 2))
-            self.node_s = self._xp.empty((count, 3))
-            if kernel == "log":
-                self.moment_re = self._xp.empty((count, self.order + 1))
-                self.moment_im = self._xp.empty((count, self.order + 1))
-                self._kernels.log_quadtree_moments(
-                    self.pos,
-                    self.charge,
-                    self.perm,
-                    count,
-                    self.node_center,
-                    self.node_start,
-                    self.node_end,
-                    self.node_qabs,
-                    self.moment_re,
-                    self.moment_im,
-                    n_threads=count,
-                )
-                self.node_q[:] = self.moment_re[:, 0]
-                self.node_p[:, 0] = self.moment_re[:, 1]
-                self.node_p[:, 1] = self.moment_im[:, 1]
-                self._stack = self._xp.empty(
-                    3 * int(self.node_depth.max()) + 8, dtype=np.int64
-                )
-                return
-            self._kernels.quadtree_moments(
-                self.pos,
-                self.charge,
-                self.perm,
-                count,
-                self.node_center,
-                self.node_start,
-                self.node_end,
-                self.node_q,
-                self.node_qabs,
-                self.node_p,
-                self.node_s,
-                n_threads=count,
-            )
-            self._stack = self._xp.empty(
-                3 * int(self.node_depth.max()) + 8, dtype=np.int64
-            )
+        self._traversals: dict = {}
+        self._moments()
+
+    def set_charges(self, charges) -> None:
+        """New charges ``(N,)`` for the same particles, without rebuilding the tree.
+
+        The cells, their particles and the FMM's interaction lists depend only on the
+        positions; this recomputes the cells' charges and moments, which costs a
+        fraction of a build. For repeated sums over fixed points, such as the products
+        of an iterative solver.
+        """
+        charges = _device(charges, compiled=self._compiled).reshape(-1)
+        if charges.shape[0] != self.pos.shape[1]:
+            raise ValueError("charges must have one entry per particle")
+        self.charge[...] = charges
+        if self.pos.shape[1]:
+            self._moments()
 
     @property
     def root(self) -> FlatNode:
@@ -851,7 +874,10 @@ class FlatQuadtree:
             return phi, field
         k = self._kernels
         count = self.node_count
-        m2l, p2p, sizes = self._traverse(theta)
+        # the interaction lists depend on the cells only: kept for set_charges
+        if theta not in self._traversals:
+            self._traversals[theta] = self._traverse(theta)
+        m2l, p2p, sizes = self._traversals[theta]
         order = self.order
         binomial = self._xp.asarray(_binomial_table(2 * order + 1))
         local_re = self._xp.zeros((count, order + 1))

@@ -973,14 +973,19 @@ class BoundaryIntegralElectrodes:
                 )
             ]
         )
-        tree = FlatQuadtree(
-            self._fmm_points,
-            sources,
-            self._fmm_quad,
-            kernel="log",
-            order=self.fmm_order,
-            leaf_capacity=32,
-        )
+        # the points never move: one tree per geometry, new charges per product
+        tree = getattr(self, "_fmm_tree", None)
+        if tree is None:
+            tree = self._fmm_tree = FlatQuadtree(
+                self._fmm_points,
+                sources,
+                self._fmm_quad,
+                kernel="log",
+                order=self.fmm_order,
+                leaf_capacity=32,
+            )
+        else:
+            tree.set_charges(sources)
         phi, _ = tree.fmm()
         return np.asarray(phi)[self._fmm_targets] + self._correction @ charge
 

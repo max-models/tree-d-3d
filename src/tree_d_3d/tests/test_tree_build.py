@@ -67,3 +67,29 @@ def test_the_numpy_split_equals_the_compiled_one(monkeypatch):
         np.testing.assert_array_equal(
             getattr(numpy_tree, attribute), getattr(expected, attribute)
         )
+
+
+@pytest.mark.parametrize("kernel", ["log", "coulomb"])
+def test_set_charges_equals_a_new_tree(kernel):
+    rng = np.random.default_rng(8)
+    pos = rng.uniform(-1, 1, (2, 3000))
+    first, second = rng.normal(size=3000), rng.normal(size=3000)
+    tree = FlatQuadtree(pos, first, Quad(0, 0, 1), kernel=kernel, leaf_capacity=16)
+    if kernel == "log":
+        tree.fmm()  # caches the interaction lists, which set_charges keeps
+    tree.set_charges(second)
+    fresh = FlatQuadtree(pos, second, Quad(0, 0, 1), kernel=kernel, leaf_capacity=16)
+    if kernel == "log":
+        a, b = tree.fmm()[1], fresh.fmm()[1]
+    else:
+        own = np.arange(3000)
+        a, b = tree.evaluate(pos, exclude=own)[1], fresh.evaluate(pos, exclude=own)[1]
+    np.testing.assert_allclose(np.asarray(a), np.asarray(b), rtol=0, atol=1e-10)
+    with pytest.raises(ValueError, match="one entry per particle"):
+        tree.set_charges(second[:10])
+
+
+def test_set_charges_on_an_empty_tree():
+    tree = FlatQuadtree(np.zeros((2, 0)), np.zeros(0), Quad(0, 0, 1))
+    tree.set_charges(np.zeros(0))
+    assert tree.node_count == 1
