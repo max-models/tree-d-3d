@@ -3238,7 +3238,7 @@ wheels = [
 [[package]]
 name = "plasma-plots"
 version = "0.3.0"
-source = { git = "https://github.com/max-models/plasma-plots?branch=devel#103220b1af911843ea9718540cfb6672ffaaac29" }
+source = { git = "https://github.com/max-models/plasma-plots?branch=quadtree-plots#d146d4c78ee25eb82b4b2121f104c2f303cfb2bf" }
 dependencies = [
     { name = "ipywidgets" },
     { name = "matplotlib", version = "3.10.9", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
@@ -4834,8 +4834,8 @@ requires-dist = [
     { name = "nbclient", marker = "extra == 'docs'", specifier = ">=0.10" },
     { name = "nbformat", marker = "extra == 'docs'", specifier = ">=5.10" },
     { name = "numpy" },
-    { name = "plasma-plots", extras = ["plotly", "web"], marker = "extra == 'docs'", git = "https://github.com/max-models/plasma-plots?branch=devel" },
-    { name = "plasma-plots", extras = ["plotly", "web"], marker = "extra == 'examples'", git = "https://github.com/max-models/plasma-plots?branch=devel" },
+    { name = "plasma-plots", extras = ["plotly", "web"], marker = "extra == 'docs'", git = "https://github.com/max-models/plasma-plots?branch=quadtree-plots" },
+    { name = "plasma-plots", extras = ["plotly", "web"], marker = "extra == 'examples'", git = "https://github.com/max-models/plasma-plots?branch=quadtree-plots" },
     { name = "plasmacoll", marker = "extra == 'examples'", git = "https://github.com/max-models/plasmacoll?branch=devel" },
     { name = "pre-commit", marker = "extra == 'dev'" },
     { name = "pyccel", specifier = ">2.0" },
