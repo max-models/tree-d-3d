@@ -61,6 +61,11 @@ FAR_POINTS: int = 2
 DIRECT_LIMIT: int = 3000
 #: Above this many target-source pairs a free-space sum walks a multipole tree.
 TREE_PAIRS: int = 4_000_000
+#: The opening angle and leaf size of the panels' multipole sums. With ``fmm_order`` 32 the
+#: error is about 2e-12 of the field, at 1.3x the speed of 0.5 with order 24 (measured on
+#: panel nodes along curves, where leaves of 16 beat 32).
+FMM_THETA: float = 0.7
+FMM_LEAF: int = 16
 
 
 def _segment_rules() -> dict:
@@ -800,7 +805,7 @@ class BoundaryIntegralElectrodes:
         far_points: int = FAR_POINTS,
         solver: str = "auto",
         tolerance: float = 1e-10,
-        fmm_order: int = 24,
+        fmm_order: int = 32,
         max_iterations: int = 2000,
     ) -> None:
         if solver not in ("auto", "direct", "gmres"):
@@ -952,8 +957,8 @@ class BoundaryIntegralElectrodes:
         """A large free-space sum by a Barnes-Hut walk with ``fmm_order`` log expansions.
 
         The tree over sources that never move (the panels' nodes, ``key``) is built
-        once and only recharged; others are built for the call. At ``theta`` = 0.5 and
-        the default order 24 the error is about 1e-14 of the field.
+        once and only recharged; others are built for the call. At `FMM_THETA` and the
+        default order 32 the error is about 1e-12 of the field.
         """
         tree = self._trees.get(key) if key is not None else None
         if tree is None:
@@ -966,13 +971,13 @@ class BoundaryIntegralElectrodes:
                 Quad(float(centre[0]), float(centre[1]), half),
                 kernel="log",
                 order=self.fmm_order,
-                leaf_capacity=32,
+                leaf_capacity=FMM_LEAF,
             )
             if key is not None:
                 self._trees[key] = tree
         else:
             tree.set_charges(charges)
-        phi, field = tree.evaluate(points, exclude=exclude, theta=0.5)
+        phi, field = tree.evaluate(points, exclude=exclude, theta=FMM_THETA)
         return np.array(phi), np.array(field)
 
     def _far_sum(
@@ -1025,11 +1030,11 @@ class BoundaryIntegralElectrodes:
                 self._fmm_quad,
                 kernel="log",
                 order=self.fmm_order,
-                leaf_capacity=32,
+                leaf_capacity=FMM_LEAF,
             )
         else:
             tree.set_charges(sources)
-        phi, _ = tree.fmm()
+        phi, _ = tree.fmm(theta=FMM_THETA)
         return np.asarray(phi)[self._fmm_targets] + self._correction @ charge
 
     @sp.profile("tree_d_3d.electrodes.gmres", tags=_PROFILE_TAGS)
