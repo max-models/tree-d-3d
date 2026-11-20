@@ -368,6 +368,25 @@ def classify_faces(point, normal):
     return face
 
 
+def _log_ticks(values: np.ndarray) -> dict:
+    """Ticks for a log axis over ``values``: decades only, or 1-2-5 for a short span."""
+    lo, hi = float(np.min(values)), float(np.max(values))
+    if np.log10(hi / lo) >= 2:
+        return {"dtick": 1, "exponentformat": "power"}
+    ticks = [
+        m * 10.0**e
+        for e in range(int(np.floor(np.log10(lo))), int(np.ceil(np.log10(hi))) + 1)
+        for m in (1, 2, 5)
+        if lo / 1.3 <= m * 10.0**e <= hi * 1.3
+    ]
+    return {"tickvals": ticks, "exponentformat": "power"}
+
+
+def _face_axis_title(face: str) -> str:
+    """Return the x-axis title of a panel of the accel grid face ``face``."""
+    return "axial position x (mm)" if face == "barrel" else "distance from axis (mm)"
+
+
 def add_plates(fig: go.Figure, shapes) -> None:
     """Draw the grids and the boundary plates as filled outlines."""
     for name, shape in shapes.items():
@@ -426,12 +445,14 @@ def main(argv: list[str] | None = None) -> Path:
             colorscale="RdBu",
             reversescale=True,
             contours={"start": -250, "end": 1100, "size": 50},
-            colorbar={"title": "phi (V)"},
+            colorbar={"title": "$\\phi\\ (\\mathrm{V})$"},
         )
     )
     add_plates(fig, shapes)
-    fig.update_xaxes(title_text="x (mm)", range=[-1.3, 8.5])
-    fig.update_yaxes(title_text="y (mm)", range=[-4.0, 4.0], scaleanchor="x")
+    fig.update_xaxes(title_text="x (mm)", range=[-1.3, 8.5], constrain="domain")
+    fig.update_yaxes(
+        title_text="y (mm)", range=[-4.0, 4.0], scaleanchor="x", constrain="domain"
+    )
     fig.update_layout(title="Screen (+1100 V), accel (-250 V) and decel (0 V) grids")
     save_figure(fig, output / "geometry")
     saddle_phi = float(electrodes.potential(np.array([[GRIDS["accel"][0]], [0.0]]))[0])
@@ -494,7 +515,7 @@ def main(argv: list[str] | None = None) -> Path:
     for i, path in cx_paths.items():
         end = str(fate.where[i])
         color = end_colors.get(end, COLORS["C0"])
-        label = f"slow ion -> {end}"
+        label = f"slow ion → {end}"
         fig.add_trace(
             go.Scatter(
                 x=path[0],
@@ -506,8 +527,10 @@ def main(argv: list[str] | None = None) -> Path:
             )
         )
         legend_done.add(label)
-    fig.update_xaxes(title_text="x (mm)", range=[-1.3, 8.5])
-    fig.update_yaxes(title_text="y (mm)", range=[-4.0, 4.0], scaleanchor="x")
+    fig.update_xaxes(title_text="x (mm)", range=[-1.3, 8.5], constrain="domain")
+    fig.update_yaxes(
+        title_text="y (mm)", range=[-4.0, 4.0], scaleanchor="x", constrain="domain"
+    )
     fig.update_layout(
         title="Primary beamlet and charge-exchange ions, by where they end"
     )
@@ -549,30 +572,40 @@ def main(argv: list[str] | None = None) -> Path:
         f"charge-exchange current to the accel grid: {100 * cx_current:.3f}% of the beam"
     )
 
-    fig = make_subplots(rows=1, cols=3, subplot_titles=list(faces))
-    for col, (name, (bins, j)) in enumerate(current_density.items(), start=1):
+    fig = make_subplots(
+        rows=3, cols=1, subplot_titles=list(faces), vertical_spacing=0.16
+    )
+    for row, (name, (bins, j)) in enumerate(current_density.items(), start=1):
         centres = 0.5 * (bins[1:] + bins[:-1])
         fig.add_trace(
             go.Bar(x=centres, y=j, marker_color=COLORS["C3"], showlegend=False),
-            row=1,
-            col=col,
+            row=row,
+            col=1,
         )
         fig.update_xaxes(
-            title_text="x (mm)" if name == "barrel" else "distance from axis (mm)",
-            row=1,
-            col=col,
+            title_text=_face_axis_title(name),
+            tickangle=0,
+            nticks=5,
+            row=row,
+            col=1,
         )
-    fig.update_yaxes(title_text="charge-exchange current density (A/m^2)", row=1, col=1)
-    fig.update_layout(title="Where the slow ions hit the accel grid")
-    save_figure(fig, output / "impact_map")
+    # one shared y title, on the middle panel
+    fig.update_yaxes(title_text="$j_\\mathrm{CEX}\\ (\\mathrm{A/m^2})$", row=2, col=1)
+    fig.update_layout(
+        title="Where the slow ions hit the accel grid", width=600, height=1200
+    )
+    save_figure(fig, output / "impact_map", width=600, height=1200)
 
     fig = make_subplots(
-        rows=1, cols=2, subplot_titles=("impact energy", "angle of incidence")
+        rows=2,
+        cols=1,
+        subplot_titles=("impact energy", "angle of incidence"),
+        vertical_spacing=0.18,
     )
-    for col, (values, bins, label) in enumerate(
+    for row, (values, bins, label) in enumerate(
         (
             (energy, np.linspace(0, 400, 41), "energy (eV)"),
-            (angle, np.linspace(0, 90, 31), "angle from the normal (deg)"),
+            (angle, np.linspace(0, 90, 31), "angle from the normal (°)"),
         ),
         start=1,
     ):
@@ -585,18 +618,25 @@ def main(argv: list[str] | None = None) -> Path:
                 marker_color=COLORS["C0"],
                 showlegend=False,
             ),
-            row=1,
-            col=col,
+            row=row,
+            col=1,
         )
-        fig.update_xaxes(title_text=label, row=1, col=col)
+        fig.update_xaxes(title_text=label, tickangle=0, nticks=5, row=row, col=1)
+    # one shared y title: both panels show the same quantity
     fig.update_yaxes(title_text="fraction of the flux", row=1, col=1)
-    fig.update_layout(title="Impacts of charge-exchange ions on the accel grid")
-    save_figure(fig, output / "impact_distributions")
+    fig.update_layout(
+        title="Impacts of charge-exchange ions on the accel grid",
+        width=600,
+        height=800,
+    )
+    save_figure(fig, output / "impact_distributions", width=600, height=800)
     mean_energy = np.sum(w_accel * energy) / max(w_accel.sum(), 1e-300)
     print(f"mean impact energy on the accel grid: {mean_energy:.0f} eV")
 
-    fig = make_subplots(rows=1, cols=3, subplot_titles=list(erosion))
-    for col, (name, (bins, rate)) in enumerate(erosion.items(), start=1):
+    fig = make_subplots(
+        rows=3, cols=1, subplot_titles=list(erosion), vertical_spacing=0.16
+    )
+    for row, (name, (bins, rate)) in enumerate(erosion.items(), start=1):
         centres = 0.5 * (bins[1:] + bins[:-1])
         fig.add_trace(
             go.Scatter(
@@ -606,17 +646,24 @@ def main(argv: list[str] | None = None) -> Path:
                 line={"color": COLORS["C3"]},
                 showlegend=False,
             ),
-            row=1,
-            col=col,
+            row=row,
+            col=1,
         )
         fig.update_xaxes(
-            title_text="x (mm)" if name == "barrel" else "distance from axis (mm)",
-            row=1,
-            col=col,
+            title_text=_face_axis_title(name),
+            tickangle=0,
+            nticks=5,
+            row=row,
+            col=1,
         )
-    fig.update_yaxes(title_text="erosion rate (um per 1000 h, estimate)", row=1, col=1)
-    fig.update_layout(title="Estimated sputter erosion of the accel grid's faces")
-    save_figure(fig, output / "erosion")
+    # one shared y title, on the middle panel
+    fig.update_yaxes(title_text="erosion (µm per 1000 h)", row=2, col=1)
+    fig.update_layout(
+        title="Estimated sputter erosion of the accel grid's faces",
+        width=600,
+        height=1200,
+    )
+    save_figure(fig, output / "erosion", width=600, height=1200)
     peaks = {
         name: (0.5 * (b[1:] + b[:-1]))[np.argmax(r)] if r.max() > 0 else np.nan
         for name, (b, r) in erosion.items()
@@ -673,14 +720,28 @@ def main(argv: list[str] | None = None) -> Path:
             x=pressures,
             y=scan_erosion,
             mode="lines+markers",
-            name="peak erosion (um / 1000 h)",
+            name="peak erosion (µm / 1000 h)",
             line={"color": COLORS["C0"]},
         ),
         secondary_y=True,
     )
-    fig.update_xaxes(type="log", title_text="neutral xenon pressure (Pa)")
-    fig.update_yaxes(type="log", title_text="current fraction", secondary_y=False)
-    fig.update_yaxes(type="log", title_text="um per 1000 h", secondary_y=True)
+    fig.update_xaxes(
+        type="log",
+        title_text="neutral xenon pressure (Pa)",
+        **_log_ticks(pressures),
+    )
+    fig.update_yaxes(
+        type="log",
+        title_text="current fraction",
+        secondary_y=False,
+        **_log_ticks(np.concatenate((scan_current, linear))),
+    )
+    fig.update_yaxes(
+        type="log",
+        title_text="µm per 1000 h",
+        secondary_y=True,
+        **_log_ticks(scan_erosion[scan_erosion > 0]),
+    )
     fig.update_layout(title="Charge-exchange current and erosion against pressure")
     save_figure(fig, output / "pressure_scan")
 

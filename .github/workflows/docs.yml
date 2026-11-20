@@ -79,6 +79,8 @@ jobs:
           echo "No shard results: the examples run here."
         fi
         uv run python docs/tools/examples.py run --python "$(pwd)/.venv/bin/python"
+        # the posters of the web figures are drawn by kaleido, which needs a Chrome
+        uv run plotly_get_chrome -y || echo "No Chrome for kaleido: the pages get no posters."
         uv run python docs/tools/examples.py convert --strict
       smoke-paths: |
         getting-started/installation/index.html

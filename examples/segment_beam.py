@@ -67,13 +67,21 @@ from plasma_plots import save_figure
 
 from tree_d_3d import FlatQuadtree, Quad
 
-COLORS = {"C0": "#1f77b4", "C1": "#ff7f0e", "C2": "#2ca02c", "C3": "#d62728"}
+COLORS = {
+    "C0": "#1f77b4",
+    "C1": "#ff7f0e",
+    "C2": "#2ca02c",
+    "C3": "#d62728",
+    "C4": "#9467bd",
+    "C5": "#8c564b",
+}
 
 K_E = 1.0 / (4.0 * np.pi)  # eps0 = 1
 CURRENT = 0.01  # per unit depth; kappa = I / 4
 HALF_WIDTH = 1.0
 LENGTH = 30.0
 KAPPA = CURRENT / 4.0
+ENVELOPE_ERROR = r"$(\text{envelope} - \text{parabola})/(\text{parabola} - y_0)$"
 
 GAUSS = {
     1: (np.array([0.5]), np.array([1.0])),
@@ -222,14 +230,21 @@ def main(argv: list[str] | None = None) -> Path:
                 x=distances,
                 y=errors,
                 mode="lines",
-                name=f"{n} point(s) per segment",
+                name=f"{n} point{'s' if n > 1 else ''} per segment",
                 line={"color": color},
             )
         )
     fig.update_xaxes(
-        type="log", title_text="distance from the segment centre / segment length"
+        type="log",
+        title_text="distance / segment length",
+        tickvals=[0.3, 1, 3, 10, 20],
     )
-    fig.update_yaxes(type="log", title_text="max relative field error over directions")
+    fig.update_yaxes(
+        type="log",
+        dtick=1,
+        exponentformat="power",
+        title_text="max relative field error",
+    )
     fig.update_layout(title="Gauss-Legendre points against the exact uniform segment")
     save_figure(fig, output / "segment_kernel")
 
@@ -250,7 +265,7 @@ def main(argv: list[str] | None = None) -> Path:
                 x=straight[:, 0, k],
                 y=straight[:, 1, k],
                 mode="lines",
-                line={"color": "lightgray", "width": 1},
+                line={"color": "#9e9e9e", "width": 1},
                 showlegend=k == 0,
                 name="field-free start",
             )
@@ -272,13 +287,14 @@ def main(argv: list[str] | None = None) -> Path:
                 x=xs,
                 y=sign * exact,
                 mode="lines",
-                line={"color": "black", "dash": "dash"},
-                name="exact envelope y0 (1 + kappa x^2)",
+                line={"color": COLORS["C3"], "dash": "dash", "width": 2},
+                name=r"$\text{exact envelope}\ y_0\,(1 + \kappa x^2)$",
                 showlegend=sign == 1,
             )
         )
-    fig.update_xaxes(title_text="x", showgrid=False)
-    fig.update_yaxes(title_text="y", scaleanchor="x", showgrid=False)
+    y_top = 1.1 * float(np.max(exact))
+    fig.update_xaxes(title_text="x", range=[0, LENGTH], showgrid=False)
+    fig.update_yaxes(title_text="y", range=[-y_top, y_top], showgrid=False)
     fig.update_layout(title="Sheet beam expanding under its own space charge")
     save_figure(fig, output / "trajectories")
 
@@ -297,15 +313,21 @@ def main(argv: list[str] | None = None) -> Path:
                 x=np.arange(1, len(h) + 1),
                 y=h,
                 mode="lines+markers",
-                name=f"omega = {omega}",
+                name=rf"$\omega = {omega}$",
                 line={"color": COLORS[f"C{i}"]},
             )
         )
     fig.update_xaxes(title_text="iteration")
+    changes = np.concatenate([np.asarray(t.y, dtype=float) for t in fig.data])
+    changes = changes[changes > 0]
+    decades = np.log10(changes.max() / changes.min()) if changes.size else 0.0
     fig.update_yaxes(
-        type="log", title_text="max change of a trajectory's y per iteration"
+        type="log",
+        dtick=1 if decades >= 2 else "D2",
+        exponentformat="power",
+        title_text="max change of y per iteration",
     )
-    fig.update_layout(title="Convergence of the trajectory / space-charge fixed point")
+    fig.update_layout(title="Convergence of the space-charge fixed point")
     save_figure(fig, output / "convergence")
 
     # 4. envelope error against the number of rays
@@ -325,11 +347,11 @@ def main(argv: list[str] | None = None) -> Path:
                 x=xs[1:],
                 y=err[1:],
                 mode="lines",
-                name=f"{k} rays, 6 mirror images per side",
+                name=f"{k} rays, 6 images",
                 line={"color": COLORS[f"C{i % 4}"]},
             )
         )
-    for images, dash in ((0, "dot"), (2, "dash")):
+    for images, dash, color in ((0, "dot", COLORS["C4"]), (2, "dash", COLORS["C5"])):
         b = Beam(rays, images=images)
         b.iterate(1.0, max_iter)
         xs, env, exact = b.envelope()
@@ -344,15 +366,14 @@ def main(argv: list[str] | None = None) -> Path:
                 x=xs[1:],
                 y=err[1:],
                 mode="lines",
-                name=f"{rays} rays, {images} mirror images per side",
-                line={"color": "black", "dash": dash},
+                name=f"{rays} rays, {images} images",
+                line={"color": color, "dash": dash, "width": 2.5},
             )
         )
     fig.update_xaxes(title_text="x")
-    fig.update_yaxes(
-        title_text="(envelope - parabola) / (parabola - y0)", range=[-0.3, 0.1]
-    )
-    fig.update_layout(title="Envelope error against the trajectory count")
+    fig.update_yaxes(title_text=ENVELOPE_ERROR)
+    fig.add_hline(y=0.0, line={"color": "gray", "dash": "dot"})
+    fig.update_layout(title="Envelope error: trajectories and mirror images per side")
     save_figure(fig, output / "envelope_error")
 
     # 5. ribbon width
@@ -377,9 +398,8 @@ def main(argv: list[str] | None = None) -> Path:
             )
         )
     fig.update_xaxes(title_text="x")
-    fig.update_yaxes(
-        title_text="(envelope - parabola) / (parabola - y0)", range=[-0.2, 0.05]
-    )
+    fig.update_yaxes(title_text=ENVELOPE_ERROR)
+    fig.add_hline(y=0.0, line={"color": "gray", "dash": "dot"})
     fig.update_layout(title=f"Envelope error against the ribbon width ({k} rays)")
     save_figure(fig, output / "ribbon")
 

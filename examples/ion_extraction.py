@@ -35,7 +35,7 @@ diode, without needing a 1D planar approximation.
    the macroparticle charge (the simulation's space-charge "knob") -- transmission falls as
    the beam's own space charge grows, the extraction analogue of a space-charge-limited diode.
 5. ``beam_formation``: an animation of the real-space (x, y) ion positions, from the initial
-   fill to the steady extracted beam.
+   fill to the steady extracted beam, with the transmission so far in the top right corner.
 
 Usage::
 
@@ -79,13 +79,14 @@ def _add_player(
 ) -> None:
     """A Play button and a frame slider, as ``plasma_plots.heatmap_movie`` does for heatmaps."""
     fig.update_layout(
+        margin={"b": 120},
         updatemenus=[
             {
                 "type": "buttons",
                 "showactive": False,
                 "x": 0.0,
                 "xanchor": "left",
-                "y": -0.18,
+                "y": -0.12,
                 "yanchor": "top",
                 "buttons": [
                     {
@@ -118,9 +119,11 @@ def _add_player(
                     }
                     for frame in frames
                 ],
-                "x": 0.12,
-                "len": 0.88,
-                "y": -0.1,
+                "x": 0.0,
+                "len": 1.0,
+                "y": -0.22,
+                "yanchor": "top",
+                "pad": {"t": 10},
                 "currentvalue": {"prefix": prefix},
             },
         ],
@@ -284,6 +287,20 @@ class ExtractionSource:
         return self.n_collected / total if total else float("nan")
 
 
+def _status_note(text: str) -> dict:
+    """Return an annotation in the top right corner of the plot that shows ``text``."""
+    return {
+        "x": 1,
+        "y": 1,
+        "xref": "paper",
+        "yref": "paper",
+        "xanchor": "right",
+        "yanchor": "top",
+        "text": text,
+        "showarrow": False,
+    }
+
+
 def add_plates(fig: go.Figure, source: ExtractionSource, color: str = "black") -> None:
     """Draw the electrode plates as filled polygons from their simgeometry outlines."""
     for _, _, shape in source.plates:
@@ -314,18 +331,24 @@ def plot_geometry(output: Path, source: ExtractionSource, v_ext: float) -> None:
             x=midpoints[0],
             y=midpoints[1],
             mode="markers",
-            marker={"size": 3, "color": "black"},
-            name=f"panel midpoints ({source.electrodes.num_panels})",
+            marker={"size": 3, "color": MPL_COLORS["C1"]},
+            name="panel midpoints",
+            showlegend=False,
         )
     )
+    # both labels above the plates: the electrodes are far enough apart in x
+    edge = PLATE_LENGTH + max(A0, A1)
     for x, v, label in ((X0, 0.0, "plasma electrode"), (X1, -v_ext, "extractor")):
         fig.add_annotation(
-            x=x, y=PLATE_LENGTH + 2.0, text=f"{label}<br>V = {v:g}", showarrow=False
+            x=x, y=edge, text=f"{label}<br>V = {v:g}", showarrow=False, yanchor="bottom"
         )
     fig.update_xaxes(title_text="x", range=[X0 - 2, X1 + 2], showgrid=False)
-    fig.update_yaxes(title_text="y", scaleanchor="x", showgrid=False)
+    fig.update_yaxes(title_text="y", range=[-edge - 1.5, edge + 5], showgrid=False)
     fig.update_layout(
-        title="Plasma electrode and extractor, each a grounded or biased slit"
+        title=(
+            "Plasma electrode and extractor "
+            f"({source.electrodes.num_panels} panels, midpoints dotted)"
+        )
     )
     save_figure(fig, output / "geometry")
 
@@ -395,17 +418,29 @@ def plot_envelope(
             y=rms,
             mode="lines",
             line={"color": MPL_COLORS["C0"]},
-            showlegend=False,
+            name="beam rms half-width",
         )
     )
-    for x_e, half_ap in ((X0, A0), (X1, A1)):
-        fig.add_hline(y=half_ap, line={"color": "gray", "dash": "dot"})
-        fig.add_vline(x=x_e, line={"color": "gray", "dash": "dot"})
-    fig.update_xaxes(title_text="x")
-    fig.update_yaxes(title_text="beam rms half-width (time-averaged)")
-    fig.update_layout(
-        title="Beam envelope: narrow at the plasma electrode, spreading beyond it"
-    )
+    # each electrode's position (vertical) and half-aperture (horizontal) as one legend
+    # entry: labels on the lines would sit on the curve
+    x_range = [float(np.nanmin(centers)), float(np.nanmax(centers))]
+    y_top = 1.1 * max(float(np.nanmax(rms)), A0, A1)
+    for x_e, half_ap, name, color in (
+        (X0, A0, "plasma electrode", MPL_COLORS["C1"]),
+        (X1, A1, "extractor", MPL_COLORS["C2"]),
+    ):
+        fig.add_trace(
+            go.Scatter(
+                x=[x_e, x_e, None, *x_range],
+                y=[0, y_top, None, half_ap, half_ap],
+                mode="lines",
+                line={"color": color, "dash": "dot"},
+                name=f"{name}: position, half-aperture",
+            )
+        )
+    fig.update_xaxes(title_text="x (code units)", range=x_range)
+    fig.update_yaxes(title_text="rms half-width (code units)", range=[0, y_top])
+    fig.update_layout(title="Beam envelope, time-averaged")
     save_figure(fig, output / "envelope")
 
 
@@ -443,9 +478,7 @@ def plot_transmission_scaling(
     )
     fig.update_xaxes(title_text="macroparticle charge (space-charge strength)")
     fig.update_yaxes(title_text="transmission past the extractor (%)")
-    fig.update_layout(
-        title="Space-charge-limited extraction: the extractor intercepts more as the beam's own repulsion grows"
-    )
+    fig.update_layout(title="Transmission against the beam's space charge")
     save_figure(fig, output / "transmission_scaling")
 
 
@@ -457,16 +490,6 @@ def animate_beam_formation(
 ) -> None:
     """Figure 5."""
     fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=[],
-            y=[],
-            mode="markers",
-            marker={"size": 3, "color": MPL_COLORS["C0"], "opacity": 0.6},
-            showlegend=False,
-        )
-    )
-    add_plates(fig, source)
     fig.update_xaxes(
         title_text="x", range=[RESERVOIR_X[0] - 1, source.x_final + 1], showgrid=False
     )
@@ -478,24 +501,43 @@ def animate_beam_formation(
     )
 
     frame_list = []
-    for frame_i in range(frames):
+    for _ in range(frames):
         for _ in range(steps_per_frame):
             source.step()
-        title = (
-            f"t = {source.time:.2f}: transmission = {100 * source.transmission():.0f}%"
+        transmission = source.transmission()
+        status = (
+            f"transmission {100 * transmission:.0f}%"
+            if np.isfinite(transmission)
+            else "no ion collected or lost yet"
         )
         frame_list.append(
             go.Frame(
-                name=f"{frame_i}",
+                name=f"{source.time:.2f}",
                 data=[go.Scatter(x=source.pos[0], y=source.pos[1])],
                 traces=[0],
-                layout=go.Layout(title=title),
+                layout=go.Layout(annotations=[_status_note(status)]),
             )
         )
+    # the initial trace shows frame 0, so that the figure is not empty before Play
+    first = frame_list[0].data[0] if frame_list else go.Scatter(x=[], y=[])
+    fig.add_trace(
+        go.Scatter(
+            x=first.x,
+            y=first.y,
+            mode="markers",
+            marker={"size": 3, "color": MPL_COLORS["C0"], "opacity": 0.6},
+            showlegend=False,
+        )
+    )
+    add_plates(fig, source)
     fig.frames = frame_list
-    if frame_list:
-        fig.update_layout(title=frame_list[0].layout.title.text)
-    _add_player(fig, frame_list, prefix="frame ")
+    # a fixed title (the time is on the slider, the transmission in a note that the frames
+    # update), so that the page can show the title above the plot
+    fig.update_layout(
+        title="Beam formation from the first ions on",
+        annotations=list(frame_list[0].layout.annotations) if frame_list else [],
+    )
+    _add_player(fig, frame_list, prefix="t = ")
     save_figure(fig, output / "beam_formation", frame=-1)
 
 

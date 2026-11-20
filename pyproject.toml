@@ -39,14 +39,16 @@ optional-dependencies.dev = [
   "tree-d-3d[test,docs,examples]",
 ]
 optional-dependencies.examples = [
-  "plasma-plots[plotly]",
+  "plasma-plots[plotly,web]>=0.3",
   "plasmacoll>=0.2.0",
 ]
 optional-dependencies.docs = [
   "griffe",
   "ipykernel",
   "nbclient>=0.10",
+  "kaleido",
   "nbformat>=5.10",
+  "plasma-plots[plotly,web]>=0.3",
   "tree-d-3d[examples]",
 ]
 optional-dependencies.gpu = [ "cupy-cuda12x" ]

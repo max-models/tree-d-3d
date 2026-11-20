@@ -86,9 +86,19 @@ def _leaf_shapes(nodes, **kw) -> list[dict]:
 
 
 def _add_player(
-    fig: go.Figure, frames: list[go.Frame], *, duration: int = 40, prefix: str = "t = "
+    fig: go.Figure,
+    frames: list[go.Frame],
+    *,
+    duration: int = 40,
+    prefix: str = "t = ",
+    labels: list[str] | None = None,
 ) -> None:
-    """A Play button and a frame slider, as ``plasma_plots.heatmap_movie`` does for heatmaps."""
+    """A Play button and a frame slider, as ``plasma_plots.heatmap_movie`` does for heatmaps.
+
+    ``labels`` are the slider's step labels (default: the frame names).
+    """
+    if labels is None:
+        labels = [frame.name for frame in frames]
     fig.update_layout(
         updatemenus=[
             {
@@ -96,7 +106,7 @@ def _add_player(
                 "showactive": False,
                 "x": 0.0,
                 "xanchor": "left",
-                "y": -0.18,
+                "y": -0.12,
                 "yanchor": "top",
                 "buttons": [
                     {
@@ -124,14 +134,16 @@ def _add_player(
                                 "mode": "immediate",
                             },
                         ],
-                        "label": frame.name,
+                        "label": label,
                         "method": "animate",
                     }
-                    for frame in frames
+                    for frame, label in zip(frames, labels)
                 ],
-                "x": 0.12,
-                "len": 0.88,
-                "y": -0.1,
+                "x": 0.0,
+                "len": 1.0,
+                "y": -0.22,
+                "yanchor": "top",
+                "pad": {"t": 10},
                 "currentvalue": {"prefix": prefix},
             },
         ],
@@ -265,9 +277,8 @@ def plot_opening_criterion(output: Path, n: int = 800, theta: float = 0.5) -> No
     fig.update_yaxes(range=[-1.05, 1.05], showgrid=False)
     fig.update_layout(
         title=(
-            f"Opening test for one target, θ = {theta}: {len(accepted)} boxes accepted as "
-            f"one multipole (green), {len(leaves)} leaves visited particle by particle "
-            f"(orange); plain boxes were opened on the way down"
+            f"θ = {theta}: {len(accepted)} boxes accepted (green), "
+            f"{len(leaves)} leaves visited (orange)"
         ),
         legend={"font": {"size": 10}},
     )
@@ -293,12 +304,11 @@ def plot_theta_tradeoff(output: Path, n: int = 6000) -> None:
         print(f"  theta={theta:.1f} error {errors[-1]:.2e} time {times_ms[-1]:.1f} ms")
 
     fig = make_subplots(
-        rows=1,
-        cols=2,
-        subplot_titles=(
-            "accuracy: smaller θ opens more boxes",
-            "cost: smaller θ visits more node pairs",
-        ),
+        rows=2,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.1,
+        subplot_titles=("accuracy", "cost"),
     )
     fig.add_trace(
         go.Scatter(x=thetas, y=errors, mode="lines+markers", showlegend=False),
@@ -307,20 +317,23 @@ def plot_theta_tradeoff(output: Path, n: int = 6000) -> None:
     )
     fig.update_yaxes(
         type="log",
-        title_text="max field error relative to the direct sum",
+        dtick=1,
+        exponentformat="power",
+        title_text="max relative error",
         row=1,
         col=1,
     )
     fig.add_trace(
         go.Scatter(x=thetas, y=times_ms, mode="lines+markers", showlegend=False),
-        row=1,
-        col=2,
+        row=2,
+        col=1,
     )
-    fig.update_yaxes(title_text="wall-clock time [ms]", row=1, col=2)
-    for col in (1, 2):
-        fig.update_xaxes(title_text="opening angle θ", row=1, col=col)
-    fig.update_layout(title=f"Accuracy/speed tradeoff of the opening angle (N = {n})")
-    save_figure(fig, output / "theta_tradeoff")
+    fig.update_yaxes(title_text="wall-clock time (ms)", row=2, col=1)
+    fig.update_xaxes(title_text="$\\text{opening angle }\\theta$", row=2, col=1)
+    fig.update_layout(
+        title=f"Opening angle: accuracy against cost (N = {n})", height=760
+    )
+    save_figure(fig, output / "theta_tradeoff", height=760)
 
 
 # -- 4: scaling ---------------------------------------------------------------------------
@@ -404,8 +417,10 @@ def plot_scaling(output: Path, quick: bool) -> None:
             name="∝ N log N",
         )
     )
-    fig.update_xaxes(type="log", title_text="N")
-    fig.update_yaxes(type="log", title_text="wall-clock time [s]")
+    fig.update_xaxes(type="log", dtick=1, title_text="$N$")
+    fig.update_yaxes(
+        type="log", dtick=1, exponentformat="power", title_text="wall-clock time (s)"
+    )
     fig.update_layout(
         title="The tree walk scales as N log N, the direct sum as N²",
         legend={"font": {"size": 10}},
@@ -435,64 +450,62 @@ def animate_cluster_merge(
     output: Path, n_each: int = 75, frames: int = 50, steps_per_frame: int = 2
 ) -> None:
     """``cluster_merge``: two star clusters colliding, animated with the current tree."""
-    bodies, labels = _two_clusters(n_each, seed=6)
+    bodies, cluster = _two_clusters(n_each, seed=6)
     sim = BarnesHutSimulation(
         bodies, Quad(0, 0, 2.0), theta=0.6, G=2e-3, softening=0.05, dt=0.03
     )
 
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=[],
-            y=[],
-            mode="markers",
-            marker={"size": 5, "color": MPL_COLORS["C3"]},
-            name="cluster A",
-        )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=[],
-            y=[],
-            mode="markers",
-            marker={"size": 5, "color": MPL_COLORS["C0"]},
-            name="cluster B",
-        )
-    )
-    fig.update_xaxes(range=[-1.4, 1.4], scaleanchor="y", showgrid=False)
-    fig.update_yaxes(range=[-1.4, 1.4], showgrid=False)
-    fig.update_layout(legend={"font": {"size": 10}})
-
-    frame_list = []
+    frame_list, labels = [], []
     for frame_i in range(frames):
         for _ in range(steps_per_frame):
             tree = sim.step()
         pos = np.array([body.pos for body in bodies])
         n_leaves = sum(1 for node in tree.collect_nodes() if node.is_external())
         t = (frame_i + 1) * steps_per_frame * sim.dt
-        title = f"t = {t:.2f}: {n_leaves} leaf boxes"
+        labels.append(f"{t:.2f}")
         frame_list.append(
             go.Frame(
                 name=f"{frame_i}",
                 data=[
-                    go.Scatter(x=pos[labels < 0, 0], y=pos[labels < 0, 1]),
-                    go.Scatter(x=pos[labels > 0, 0], y=pos[labels > 0, 1]),
+                    go.Scatter(x=pos[cluster < 0, 0], y=pos[cluster < 0, 1]),
+                    go.Scatter(x=pos[cluster > 0, 0], y=pos[cluster > 0, 1]),
                 ],
                 traces=[0, 1],
                 layout=go.Layout(
                     shapes=_leaf_shapes(
                         tree.collect_nodes(), color="rgb(160,160,160)", width=0.4
                     ),
-                    title=title,
+                    title=f"t = {t:.2f}: {n_leaves} leaf boxes",
                 ),
             )
         )
-    fig.frames = frame_list
-    if frame_list:
-        fig.update_layout(
-            shapes=frame_list[0].layout.shapes, title=frame_list[0].layout.title.text
+
+    fig = go.Figure()
+    for i, (name, color) in enumerate(
+        (("cluster A", MPL_COLORS["C3"]), ("cluster B", MPL_COLORS["C0"]))
+    ):
+        first = frame_list[0].data[i]
+        fig.add_trace(
+            go.Scatter(
+                x=first.x,
+                y=first.y,
+                mode="markers",
+                marker={"size": 5, "color": color},
+                name=name,
+            )
         )
-    _add_player(fig, frame_list, duration=60, prefix="frame ")
+    fig.update_xaxes(
+        range=[-1.4, 1.4], scaleanchor="y", constrain="domain", showgrid=False
+    )
+    fig.update_yaxes(range=[-1.4, 1.4], constrain="domain", showgrid=False)
+    fig.frames = frame_list
+    fig.update_layout(
+        legend={"font": {"size": 10}},
+        margin={"b": 120},
+        shapes=frame_list[0].layout.shapes,
+        title=frame_list[0].layout.title.text,
+    )
+    _add_player(fig, frame_list, duration=60, prefix="t = ", labels=labels)
     save_figure(fig, output / "cluster_merge", frame=-1)
 
 

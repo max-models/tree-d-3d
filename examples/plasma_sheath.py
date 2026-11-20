@@ -20,13 +20,14 @@ sheath -- while the bulk stays quasi-neutral. Saves one figure per claim:
    average; it returns to (near) zero at both grounded plates -- the Dirichlet
    condition the image charges enforce exactly -- while the bulk floats higher,
    with most of the drop concentrated in the sheath layers.
-4. ``field_profile``: the field E_x against x, same time average; close to zero
+4. ``field_profile``: the field ``E_x`` against x, same time average; close to zero
    in the quasi-neutral bulk and pointing from the bulk toward each wall inside
    the sheath layers.
 5. ``particle_loss``: electrons and ions remaining against time; the walls are a
    real particle sink, with the bulk only partly depleted over the plotted window.
 6. ``sheath_formation``: an (x, v_x) phase-space animation of both species, from
-   the initial uniform state to the developed sheath.
+   the initial uniform state to the developed sheath, with the particle counts in the
+   top right corner.
 
 Usage::
 
@@ -73,13 +74,14 @@ def _add_player(
 ) -> None:
     """A Play button and a frame slider, as ``plasma_plots.heatmap_movie`` does for heatmaps."""
     fig.update_layout(
+        margin={"b": 120},
         updatemenus=[
             {
                 "type": "buttons",
                 "showactive": False,
                 "x": 0.0,
                 "xanchor": "left",
-                "y": -0.18,
+                "y": -0.12,
                 "yanchor": "top",
                 "buttons": [
                     {
@@ -112,13 +114,18 @@ def _add_player(
                     }
                     for frame in frames
                 ],
-                "x": 0.12,
-                "len": 0.88,
-                "y": -0.1,
+                "x": 0.0,
+                "len": 1.0,
+                "y": -0.22,
+                "yanchor": "top",
+                "pad": {"t": 10},
                 "currentvalue": {"prefix": prefix},
             },
         ],
     )
+
+
+WALL_COLOR = "#2ca02c"  # the grounded plates, in every figure
 
 
 def _wall_shapes(L: float, y0: float, y1: float) -> list[dict]:
@@ -130,7 +137,7 @@ def _wall_shapes(L: float, y0: float, y1: float) -> list[dict]:
             "x1": x,
             "y0": y0,
             "y1": y1,
-            "line": {"color": "black", "width": 2},
+            "line": {"color": WALL_COLOR, "width": 3},
         }
         for x in (0.0, L)
     ]
@@ -319,10 +326,18 @@ def plot_setup(output: Path, L: float, Ly: float, n_half: int) -> None:
             )
         )
     fig.update_layout(shapes=_wall_shapes(L, -Ly / 2, Ly / 2))
-    fig.update_xaxes(title_text="x", range=[-0.02 * L, 1.02 * L], showgrid=False)
-    fig.update_yaxes(title_text="y", scaleanchor="x", showgrid=False)
+    fig.update_xaxes(
+        title_text="x", range=[-0.02 * L, 1.02 * L], showgrid=False, constrain="domain"
+    )
+    fig.update_yaxes(
+        title_text="y",
+        range=[-0.52 * Ly, 0.52 * Ly],
+        scaleanchor="x",
+        constrain="domain",
+        showgrid=False,
+    )
     fig.update_layout(
-        title="A quasi-neutral plasma starts uniform between two grounded walls (black)",
+        title="Uniform plasma between grounded walls (green)",
         legend={"font": {"size": 10}},
     )
     save_figure(fig, output / "setup")
@@ -348,11 +363,11 @@ def plot_density_profile(output: Path, profile: dict) -> None:
             )
         )
     fig.update_xaxes(title_text="x")
-    fig.update_yaxes(title_text="linear density, particles / length (time-averaged)")
+    fig.update_yaxes(title_text="particles per length (time-averaged)")
     fig.update_layout(
         title=(
-            f"Quasi-neutral bulk, excess ions against both walls (domain ≈ "
-            f"{profile['x'][-1] / profile['lam_D']:.0f} λ_D wide)"
+            "Densities, domain ≈ "
+            f"{profile['x'][-1] / profile['lam_D']:.0f} Debye lengths wide"
         ),
         legend={"font": {"size": 10}},
     )
@@ -372,10 +387,8 @@ def plot_potential_profile(output: Path, profile: dict) -> None:
         )
     )
     fig.update_xaxes(title_text="x")
-    fig.update_yaxes(title_text="potential φ (time-averaged)")
-    fig.update_layout(
-        title="φ = 0 at both grounded plates (Dirichlet, enforced by the image charges), bulk floats higher"
-    )
+    fig.update_yaxes(title_text=r"$\phi\ \text{(time-averaged)}$")
+    fig.update_layout(title="Potential: zero at both grounded plates")
     save_figure(fig, output / "potential_profile")
 
 
@@ -391,12 +404,10 @@ def plot_field_profile(output: Path, profile: dict) -> None:
             showlegend=False,
         )
     )
-    fig.add_hline(y=0, line={"color": "black", "width": 0.5})
+    fig.add_hline(y=0, line={"color": "gray", "width": 1})
     fig.update_xaxes(title_text="x")
-    fig.update_yaxes(title_text="E_x (time-averaged)")
-    fig.update_layout(
-        title="Field near zero in the quasi-neutral bulk, pointing toward each wall in its sheath"
-    )
+    fig.update_yaxes(title_text=r"$E_x\ \text{(time-averaged)}$")
+    fig.update_layout(title="Field: near zero in the bulk, wallward in the sheaths")
     save_figure(fig, output / "field_profile")
 
 
@@ -418,7 +429,7 @@ def plot_particle_loss(output: Path, profile: dict) -> None:
     fig.update_xaxes(title_text="time")
     fig.update_yaxes(title_text="particles remaining")
     fig.update_layout(
-        title="The grounded walls are a real particle sink; the bulk is only partly depleted here",
+        title="Particles lost to the grounded walls",
         legend={"font": {"size": 10}},
     )
     save_figure(fig, output / "particle_loss")
@@ -434,15 +445,48 @@ def animate_sheath_formation(
     sheath = Sheath(L, Ly, n_half, seed=3)
     v_scale = 3.0
 
+    frame_list = []
+    for _ in range(frames):
+        for _ in range(steps_per_frame):
+            sheath.step()
+        n_e, n_i = sheath.counts()
+        status = f"Nₑ = {n_e}, Nᵢ = {n_i}"
+        data = []
+        for species in (ELECTRON, ION):
+            sel = sheath.species == species
+            data.append(go.Scatter(x=sheath.pos[0, sel], y=sheath.vel[0, sel]))
+        frame_list.append(
+            go.Frame(
+                name=f"{sheath.time:.2f}",
+                data=data,
+                traces=[0, 1],
+                layout=go.Layout(
+                    annotations=[
+                        {
+                            "x": 1,
+                            "y": 1,
+                            "xref": "paper",
+                            "yref": "paper",
+                            "xanchor": "right",
+                            "yanchor": "top",
+                            "text": status,
+                            "showarrow": False,
+                        }
+                    ]
+                ),
+            )
+        )
+
+    # the initial traces show frame 0, so that the figure is not empty before Play
     fig = go.Figure()
-    for _species, name, color in (
-        (ELECTRON, "electrons", MPL_COLORS["C0"]),
-        (ION, "ions", MPL_COLORS["C3"]),
+    for k, (name, color) in enumerate(
+        (("electrons", MPL_COLORS["C0"]), ("ions", MPL_COLORS["C3"]))
     ):
+        first = frame_list[0].data[k] if frame_list else go.Scatter(x=[], y=[])
         fig.add_trace(
             go.Scatter(
-                x=[],
-                y=[],
+                x=first.x,
+                y=first.y,
                 mode="markers",
                 marker={"size": 3, "color": color, "opacity": 0.6},
                 name=name,
@@ -450,31 +494,17 @@ def animate_sheath_formation(
         )
     fig.update_layout(shapes=_wall_shapes(L, -v_scale, v_scale))
     fig.update_xaxes(title_text="x", range=[-0.02 * L, 1.02 * L])
-    fig.update_yaxes(title_text="v_x", range=[-v_scale, v_scale])
+    fig.update_yaxes(title_text="$v_x$", range=[-v_scale, v_scale])
     fig.update_layout(legend={"font": {"size": 10}})
-
-    frame_list = []
-    for frame_i in range(frames):
-        for _ in range(steps_per_frame):
-            sheath.step()
-        n_e, n_i = sheath.counts()
-        title = f"t = {sheath.time:.2f}: N_e = {n_e}, N_i = {n_i}"
-        data = []
-        for species in (ELECTRON, ION):
-            sel = sheath.species == species
-            data.append(go.Scatter(x=sheath.pos[0, sel], y=sheath.vel[0, sel]))
-        frame_list.append(
-            go.Frame(
-                name=f"{frame_i}",
-                data=data,
-                traces=[0, 1],
-                layout=go.Layout(title=title),
-            )
-        )
     fig.frames = frame_list
-    if frame_list:
-        fig.update_layout(title=frame_list[0].layout.title.text)
-    _add_player(fig, frame_list, duration=60, prefix="frame ")
+    # a fixed title (the time is on the slider, the particle counts in a note in the
+    # plot's top right corner that the frames update), so that the page can show the
+    # title above the plot
+    fig.update_layout(
+        title="Phase space of the forming sheath",
+        annotations=list(frame_list[0].layout.annotations) if frame_list else [],
+    )
+    _add_player(fig, frame_list, duration=60, prefix="t = ")
     save_figure(fig, output / "sheath_formation", frame=-1)
 
 
