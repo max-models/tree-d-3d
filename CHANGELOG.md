@@ -5,6 +5,25 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- Faster panel solves and sums (measured on a 4-core CPU, 3 runs each):
+  - GMRES keeps one FMM tree per geometry and only recharges it (`FlatQuadtree.set_charges`,
+    interaction lists cached per opening angle), and is preconditioned by the exact panel
+    matrix of each run of 256 consecutive panels (block Jacobi): 150 to 51 iterations at
+    21k panels, the solve 27.9 to 7.6 s.
+  - Probes and sums over free charges above `TREE_PAIRS` pairs walk a multipole tree, kept
+    for the panels: 100k probes 9.2 to 0.75 s at 21k panels, 1.27 to 0.18 s at 2.7k.
+    `inside` uses simgeometry's compiled containment test.
+  - The panels' multipole sums run at theta 0.7 with order 32 and leaves of 16, the measured
+    optimum at their accuracy (about 1e-12).
+  - Periodic sums and GMRES products run in the plane mapped by `exp(2 pi z / period)`, where
+    a row of copies is one charge: 20k periodic probes 57 s to 0.13 s, a solve with 20k free
+    charges 2.6 to 0.02 s; `solver="gmres"` now works with a period (within `MAP_REACH`
+    periods along x).
+  - The CPU tree build splits a level in one `quadtree_split` kernel call instead of
+    `(N, 4)` prefix sums: builds 1.1-1.6x faster, the trees unchanged.
+
 ## [0.2.0] - 2026-11-20
 
 ### Changed
