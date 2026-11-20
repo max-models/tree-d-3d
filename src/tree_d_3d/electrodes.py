@@ -25,7 +25,7 @@ stacked and mirrored copies of the electrodes an extraction cell would otherwise
 Up to `DIRECT_LIMIT` panels the system is solved directly, by an LU factorisation done
 once per geometry and reused by every `BoundaryIntegralElectrodes.solve`. Above it, in
 free space or beside a face, ``solver="auto"`` iterates instead: GMRES, preconditioned by
-the panels' self terms, with each product ``S Q`` a fast multipole sum over the Gauss
+the exact panel matrix of each run of consecutive panels (block Jacobi), with each product ``S Q`` a fast multipole sum over the Gauss
 nodes (`tree_d_3d.FlatQuadtree.fmm`) plus the sparse exact near corrections, so memory
 and time grow almost linearly with the panels instead of as ``P**2`` and ``P**3``.
 
@@ -66,6 +66,8 @@ TREE_PAIRS: int = 4_000_000
 #: panel nodes along curves, where leaves of 16 beat 32).
 FMM_THETA: float = 0.7
 FMM_LEAF: int = 16
+#: Consecutive panels of a conductor per block of the GMRES preconditioner.
+PRECONDITIONER_BLOCK: int = 256
 
 
 def _segment_rules() -> dict:
@@ -473,7 +475,7 @@ def _grounded_circle_problem() -> ConvergenceProblem:
     assumptions=(
         r"a first-kind single-layer equation; straight panels of uniform charge $Q_k$ (piecewise-constant density), collocated at their midpoints $\mathbf m_k$",
         r"$G$ = `far_points` = 2 Gauss-Legendre nodes $x_g$, weights $\omega_g$, per far panel; panels within $n_\mathrm{near}$ = `near_field` = 4 of their lengths enter exactly (`segment_field`)",
-        r"$\mathsf S$ is not symmetric: up to `DIRECT_LIMIT` panels dense and LU-factorised once, $O(P^3)$, and $O(P^2)$ per `solve`; above it GMRES with a Jacobi (self-term) preconditioner and FMM products, $O(P)$ per iteration, the iterations growing slowly with $P$",
+        r"$\mathsf S$ is not symmetric: up to `DIRECT_LIMIT` panels dense and LU-factorised once, $O(P^3)$, and $O(P^2)$ per `solve`; above it GMRES with a block-Jacobi preconditioner (runs of `PRECONDITIONER_BLOCK` consecutive panels) and FMM products, $O(P)$ per iteration, the iterations growing slowly with $P$",
         r"no conductor at infinity and no constraint on the total charge: the reference length of the logarithm is the unit of length, and a lone conductor of logarithmic capacity 1 (a circle of radius 1) makes $\mathsf S$ singular",
         r"keep panels shorter than the gaps between surfaces; the order is in the panel length",
         r"with a period $P$ along $y$ the point kernel is the row sum $G_P$ (`periodic_log_kernel`) and the near panel copies, shifted by $\pm P$, enter exactly; a face $\mathsf M$ mirrors every charge about it, and the conductors' potentials are measured from a Dirichlet face's $V_\mathrm{face}$",
@@ -762,14 +764,33 @@ class BoundaryIntegralElectrodes:
                 held[candidates[self._loop_polygon(conductor)(shifted)]] = True
         return held
 
+    def _exact_block(self, block: np.ndarray) -> np.ndarray:
+        """The dense ``S`` among the panels ``block``: their point terms and near corrections."""
+        k = self.far_points
+        matrix = np.zeros((block.size, block.size))
+        for image, sign in enumerate(self._image_signs):
+            nodes = self._image_nodes[image]
+            for g in range(k):
+                matrix += (
+                    sign
+                    * self._weights[g]
+                    * self._pairwise_potential(
+                        self.midpoints[:, block], nodes[:, block * k + g]
+                    )
+                )
+        return matrix + self._correction[block][:, block].toarray()
+
     def _prepare_iterative(self) -> None:
-        """The sparse near corrections and the diagonal of the GMRES solve.
+        """The sparse near corrections and the block preconditioner of the GMRES solve.
 
         ``S Q`` is the FMM sum over every panel's Gauss nodes (and their mirror
         images), with the panel midpoints as charge-free targets, plus the sparse
-        near correction ``C`` (exact segment less point terms). The diagonal of ``S``
-        (each panel's self term) preconditions; a sparse LU of all near entries does
-        worse for this first-kind equation, whose smooth far part it leaves out.
+        near correction ``C`` (exact segment less point terms). The preconditioner is
+        block Jacobi: the exact ``S`` among each run of `PRECONDITIONER_BLOCK`
+        consecutive panels of a conductor, LU-factorised once. It takes in the
+        high-frequency modes of this first-kind equation, which are local along a
+        conductor: 51 iterations instead of 150 with the self terms alone at 21k panels.
+        A sparse LU of all near entries does worse, missing their smooth far part.
         """
         target, panel, image, shift = self._near_entries()
         correction, _ = self._near_correction(
@@ -777,7 +798,12 @@ class BoundaryIntegralElectrodes:
         )
         shape = (self.num_panels, self.num_panels)
         self._correction = csc_matrix((correction, (target, panel)), shape=shape)
-        self._diagonal = 2.0 * (1.0 - np.log(self.lengths / 2.0))
+        self._blocks = []
+        for conductor in np.unique(self.group):
+            panels = np.flatnonzero(self.group == conductor)
+            for first in range(0, panels.size, PRECONDITIONER_BLOCK):
+                block = panels[first : first + PRECONDITIONER_BLOCK]
+                self._blocks.append((block, lu_factor(self._exact_block(block))))
         # the FMM's sources (every image's nodes) and its charge-free targets
         nodes = np.concatenate(list(self._image_nodes), axis=1)
         k = self.far_points
@@ -1009,6 +1035,13 @@ class BoundaryIntegralElectrodes:
             return np.array(phi), np.array(field)
         return self._periodic_sum(points, sources, sign * charges)
 
+    def _precondition(self, residual: np.ndarray) -> np.ndarray:
+        """The block-Jacobi solve (`_prepare_iterative`)."""
+        out = np.empty_like(residual)
+        for block, lu in self._blocks:
+            out[block] = lu_solve(lu, residual[block])
+        return out
+
     def _apply(self, charge: np.ndarray) -> np.ndarray:
         """``S @ charge`` by the FMM and the sparse near corrections."""
         node_charge = np.repeat(charge, self.far_points) * self._node_weights
@@ -1039,9 +1072,9 @@ class BoundaryIntegralElectrodes:
 
     @sp.profile("tree_d_3d.electrodes.gmres", tags=_PROFILE_TAGS)
     def _solve_iterative(self, rhs: np.ndarray) -> np.ndarray:
-        """GMRES on `_apply`, preconditioned by the panels' self terms."""
+        """GMRES on `_apply`, preconditioned block by block (`_precondition`)."""
         operator = _Operator(self.num_panels, self._apply)
-        preconditioner = _Operator(self.num_panels, lambda v: v / self._diagonal)
+        preconditioner = _Operator(self.num_panels, self._precondition)
         count = [0]
 
         def callback(_):
