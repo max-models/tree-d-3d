@@ -231,6 +231,21 @@ def periodic_log_kernel(d, period: float) -> tuple[np.ndarray, np.ndarray]:
     return phi, k * np.stack((ex, ey))
 
 
+def _in_loop(points: np.ndarray, vertices: np.ndarray) -> np.ndarray:
+    """Even-odd test of ``(2, M)`` points against the closed loop ``vertices`` ``(2, n)``."""
+    x, y = points
+    inside = np.zeros(x.size, dtype=bool)
+    xa, ya = vertices
+    xb, yb = np.roll(xa, -1), np.roll(ya, -1)
+    for x0, y0, x1, y1 in zip(xa, ya, xb, yb):
+        if y0 == y1:
+            continue
+        straddles = (y0 > y) != (y1 > y)
+        crossing = x0 + (y - y0) * (x1 - x0) / (y1 - y0)
+        inside ^= straddles & (x < crossing)
+    return inside
+
+
 @dataclass(frozen=True)
 class Face:
     """A plane domain face, ``x = position`` (``axis="x"``) or ``y = position``.
@@ -486,6 +501,12 @@ class BoundaryIntegralElectrodes:
     side of the face, the physical one. With a period the potential far from the
     conductors grows linearly in ``|x|`` unless the total charge per period
     vanishes; a domain closed by conductors and faces is unaffected.
+
+    Conductors at one potential may touch along an edge, also across the period
+    seam: the panel pairs on the shared edge are dropped (``num_shared_panels``), so
+    the conductors act as their union. `probe` returns the exact potential and zero
+    field inside a solid conductor (`inside`), and `surface_field` the normal field
+    just outside each panel.
     """
 
     def _near_pairs(
@@ -601,6 +622,73 @@ class BoundaryIntegralElectrodes:
         np.add.at(matrix, (target, panel), correction)
         return matrix
 
+    def _drop_shared_edges(self) -> None:
+        """Remove the panel pairs where two conductors touch along an edge.
+
+        Two loops sharing an edge (also across a period) would put two panels with
+        opposite orientation on the same segment, which makes the panel system
+        singular. When both panels belong to conductors at the same potential, the
+        pair is interior to the union of the two and is dropped; at different
+        potentials the touching conductors are an error. A shared edge must be
+        panelled the same way from both sides, as `conductors_from_shape` does.
+        """
+        lengths = self.lengths
+        scale = float(np.max(np.abs(np.concatenate((self.starts, self.ends), axis=1))))
+        tolerance = 1e-9 * max(scale, float(lengths.max()))
+        tangent = (self.ends - self.starts) / lengths
+        tree = KDTree(self.midpoints.T)
+        drop = np.zeros(lengths.size, dtype=bool)
+        shifts = (0.0,) if self.period is None else (-self.period, 0.0, self.period)
+        for shift in shifts:
+            offset = np.array([[0.0], [shift]])
+            for i, others in enumerate(
+                tree.query_ball_point((self.midpoints + offset).T, float(lengths.max()))
+            ):
+                for j in others:
+                    if j <= i and shift == 0.0:
+                        continue
+                    if np.dot(tangent[:, i], tangent[:, j]) > -1.0 + 1e-9:
+                        continue
+                    # antiparallel: on the same line and overlapping?
+                    rel = self.midpoints[:, j] - self.midpoints[:, i] - offset[:, 0]
+                    across = abs(rel[0] * tangent[1, i] - rel[1] * tangent[0, i])
+                    along = abs(rel @ tangent[:, i])
+                    if (
+                        across > tolerance
+                        or along >= 0.5 * (lengths[i] + lengths[j]) - tolerance
+                    ):
+                        continue
+                    same = np.allclose(
+                        self.starts[:, i] + offset[:, 0],
+                        self.ends[:, j],
+                        atol=tolerance,
+                    ) and np.allclose(
+                        self.ends[:, i] + offset[:, 0],
+                        self.starts[:, j],
+                        atol=tolerance,
+                    )
+                    if not same:
+                        raise ValueError(
+                            "conductors touch along an edge panelled differently on "
+                            "its two sides; panel the shared edge the same way"
+                        )
+                    if self.target_potential[i] != self.target_potential[j]:
+                        raise ValueError(
+                            "conductors at different potentials touch along an edge"
+                        )
+                    drop[[i, j]] = True
+        keep = ~drop
+        #: number of panels dropped on edges shared by touching conductors
+        self.num_shared_panels = int(drop.sum())
+        if not keep.any():
+            raise ValueError("every panel lies on a shared edge")
+        self.midpoints = self.midpoints[:, keep]
+        self.lengths = self.lengths[keep]
+        self.starts = self.starts[:, keep]
+        self.ends = self.ends[:, keep]
+        self.group = self.group[keep]
+        self.target_potential = self.target_potential[keep]
+
     def _check_one_side(self, face: Face) -> None:
         """Raise unless every conductor lies on one side of ``face`` (touching it is allowed)."""
         axis = 0 if face.axis == "x" else 1
@@ -608,6 +696,28 @@ class BoundaryIntegralElectrodes:
         tolerance = 1e-12 * max(1.0, float(np.abs(offset).max()))
         if np.any(offset > tolerance) and np.any(offset < -tolerance):
             raise ValueError("the conductors must all lie on one side of the face")
+
+    def _loop_holds(self, conductor: Conductor, points: np.ndarray) -> np.ndarray:
+        """Mask of the ``(2, M)`` points inside a closed conductor's loop, over the periods."""
+        vertices = np.asarray(conductor.vertices, dtype=float)
+        low, high = vertices[1].min(), vertices[1].max()
+        held = np.zeros(points.shape[1], dtype=bool)
+        if not points.shape[1]:
+            return held
+        if self.period is None:
+            shifts = np.zeros(1)
+        else:
+            first = np.floor((points[1].min() - high) / self.period)
+            last = np.ceil((points[1].max() - low) / self.period)
+            shifts = np.arange(first, last + 1) * self.period
+        for shift in shifts:
+            candidates = np.flatnonzero(
+                ~held & (points[1] - shift >= low) & (points[1] - shift <= high)
+            )
+            if candidates.size:
+                shifted = points[:, candidates] - np.array([[0.0], [shift]])
+                held[candidates[_in_loop(shifted, vertices)]] = True
+        return held
 
     def __init__(
         self,
@@ -664,6 +774,7 @@ class BoundaryIntegralElectrodes:
         self.group = np.concatenate(group)
         #: the panel's conductor's potential, ``(num_panels,)``
         self.target_potential = np.concatenate(target)
+        self._drop_shared_edges()
         self.num_panels = self.midpoints.shape[1]
         if face is not None:
             self._check_one_side(face)
@@ -690,6 +801,18 @@ class BoundaryIntegralElectrodes:
         ]
         self._image_node_trees = [KDTree(nodes.T) for nodes in self._image_nodes]
         self._panel_tree = self._image_trees[0]
+        # closed loops around no other conductor: their inside is metal
+        self._solid = np.array(
+            [
+                c.closed
+                and not any(
+                    other is not c
+                    and self._loop_holds(c, np.asarray(other.vertices, float)[:, :1])
+                    for other in self.conductors
+                )
+                for c in self.conductors
+            ]
+        )
         self._shifts = (
             (0.0,) if self.period is None else (-self.period, 0.0, self.period)
         )
@@ -836,19 +959,66 @@ class BoundaryIntegralElectrodes:
         self.charge = charge
         return charge
 
+    def inside(self, points) -> np.ndarray:
+        """Per point ``(2, M)``, the index of the solid conductor holding it (-1: none).
+
+        A closed conductor is solid when its loop holds no other conductor and none
+        of the free charges passed to `solve`; a loop around them is a shell, whose
+        inside is not metal (the outer wall of a capacitor, a round chamber). Even-odd
+        rule on the vertex loop, repeated over the periods with a period; open
+        conductors hold nothing. A point on a boundary may count either way.
+        """
+        points = np.asarray(points, dtype=float).reshape(2, -1)
+        index = np.full(points.shape[1], -1, dtype=np.int64)
+        for k, conductor in enumerate(self.conductors):
+            if (
+                not self._solid[k]
+                or self._loop_holds(conductor, self._source_positions).any()
+            ):
+                continue
+            free = np.flatnonzero(index < 0)
+            index[free[self._loop_holds(conductor, points[:, free])]] = k
+        return index
+
+    def surface_field(self) -> np.ndarray:
+        """The normal field (V/m) just outside each panel, ``(num_panels,)``.
+
+        ``4 pi k_e sigma`` with ``sigma = Q / L`` the panel's charge density: by
+        Gauss's law the field leaving a closed conductor along its outward normal
+        (the field inside is zero), as needed for the force on an electrode or
+        field emission. For a panel of an open conductor (a plate of zero
+        thickness) it is the jump of the normal field across the plate. Call
+        `solve` first.
+        """
+        if self.charge is None:
+            raise RuntimeError("call solve() before surface_field()")
+        return 4.0 * np.pi * self.k_e * self.charge / self.lengths
+
     def probe(self, points) -> tuple[np.ndarray, np.ndarray]:
         """Potential (V) and field (V/m, shape ``(2, M)``) at ``points`` ``(2, M)``.
 
         Includes the solved panel charges and the free charges passed to `solve`,
         with their images; ``points`` are probes, not sources, so no self term
-        applies. Call `solve` first.
+        applies. A point inside a closed conductor (`inside`) gets the conductor's
+        potential and zero field, the exact values the panel sums approach there.
+        On a panel the potential is the conductor's to the discretisation error and
+        the field is the mean of the two sides; see `surface_field` for the field
+        just outside. Call `solve` first.
         """
         if self.charge is None:
             raise RuntimeError("call solve() before probe()")
         points = np.asarray(points, dtype=float).reshape(2, -1)
-        phi, e = self._panel_field(points, self.charge)
-        phi_s, e_s = self._source_sum(points)
-        return self.k_e * (phi + phi_s) + self.offset, self.k_e * (e + e_s)
+        holder = self.inside(points)
+        free = holder < 0
+        phi = np.empty(points.shape[1])
+        e = np.zeros((2, points.shape[1]))
+        phi[~free] = [self.conductors[k].potential for k in holder[~free]]
+        if free.any():
+            p, f = self._panel_field(points[:, free], self.charge)
+            p_s, f_s = self._source_sum(points[:, free])
+            phi[free] = self.k_e * (p + p_s) + self.offset
+            e[:, free] = self.k_e * (f + f_s)
+        return phi, e
 
     def panel_field(self, points) -> tuple[np.ndarray, np.ndarray]:
         """Potential (V) and field (V/m) at ``points`` ``(2, M)`` of all but the free charges.
