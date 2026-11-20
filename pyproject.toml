@@ -5,7 +5,7 @@ requires = [ "setuptools", "wheel" ]
 
 [project]
 name = "tree-d-3d"
-version = "0.1.0"
+version = "0.2.0"
 description = "Barnes-Hut trees and fast multipole methods for charged particles in a plane, on NumPy, CuPy or Metal."
 readme = "README.md"
 keywords = [ "barnes-hut", "cupy", "electrostatics", "fast multipole method", "fmm", "n-body", "plasma", "pyccel", "quadtree" ]
@@ -21,13 +21,13 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Physics",
 ]
 dependencies = [
-  "cunumpy>=0.7.1",
+  "cunumpy>=0.7.2",
   "methodcard",
   "numpy",
   "pyccel>2.0",
   "scipy",
   "scope-profiler>=0.7.5",
-  "simgeometry>=0.1.0",
+  "simgeometry>=0.2.1",
 ]
 
 optional-dependencies.dev = [
