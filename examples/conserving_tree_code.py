@@ -82,6 +82,16 @@ def _c(code: str) -> str:
     return MPL_COLORS.get(code, code)
 
 
+def _decade_step(values) -> int:
+    """The ``dtick`` of a log axis over ``values``: one, two or three decades per label."""
+    values = np.asarray(values, dtype=float)
+    values = values[np.isfinite(values) & (values > 0)]
+    if values.size == 0:
+        return 1
+    span = np.log10(values.max() / values.min())
+    return 1 if span <= 6 else 2 if span <= 12 else 3
+
+
 def _rect(
     cx: float,
     cy: float,
@@ -234,7 +244,7 @@ def plot_truncation(rows, output: Path) -> None:
         (
             3,
             "truncation_accuracy",
-            "max relative field error",
+            "relative field error",
             "Accuracy: the triangle needs ~4 more orders",
         ),
         (
@@ -245,6 +255,7 @@ def plot_truncation(rows, output: Path) -> None:
         ),
     ):
         fig = go.Figure()
+        values = [max(r[key], 1e-18) for r in rows]
         for theta in thetas:
             color = theta_colors[theta]
             for symmetric, dash, symbol, label in (
@@ -267,7 +278,7 @@ def plot_truncation(rows, output: Path) -> None:
             xaxis_title="$\\text{expansion order } p$",
             yaxis_title=ylabel,
             yaxis_type="log",
-            yaxis_dtick=1,
+            yaxis_dtick=_decade_step(values),
             yaxis_exponentformat="power",
             legend={"font": {"size": 10}},
         )
@@ -302,9 +313,9 @@ def plot_partition_of_unity(output: Path) -> None:
         cols=1,
         subplot_titles=(
             "$\\text{weight } w_L \\text{ of one leaf}$",
-            "sum of all leaf weights",
+            f"sum of weights: max|Σw − 1| = {np.abs(total - 1).max():.0e}",
         ),
-        vertical_spacing=0.1,
+        vertical_spacing=0.12,
     )
     fig.add_trace(
         go.Heatmap(
@@ -373,19 +384,14 @@ def plot_partition_of_unity(output: Path) -> None:
         col=1,
     )
     fig.update_yaxes(range=[-1, 1], constrain="domain", showgrid=False, row=2, col=1)
-    fig.add_annotation(
-        text=f"max |Σw − 1| = {np.abs(total - 1).max():.1e}",
-        x=-0.95,
-        y=-0.95,
-        xref="x2",
-        yref="y2",
-        xanchor="left",
-        yanchor="bottom",
-        showarrow=False,
-        font={"color": "white"},
+    fig.update_xaxes(nticks=5, tickangle=0)
+    fig.update_yaxes(nticks=5)
+    # width and height set the aspect ratio of the web figure: tall enough that the square
+    # maps fill the width of a phone
+    fig.update_layout(
+        title="Smooth membership is a partition of unity", width=550, height=1100
     )
-    fig.update_layout(title="Smooth membership is a partition of unity", height=800)
-    save_figure(fig, output / "partition_of_unity", height=800)
+    save_figure(fig, output / "partition_of_unity", width=550, height=1100)
 
 
 # -- 4: gradient check ------------------------------------------------------------
@@ -430,10 +436,10 @@ def plot_gradient_check(output: Path, n: int = 300) -> None:
     fig = make_subplots(
         rows=2,
         cols=1,
-        vertical_spacing=0.15,
+        vertical_spacing=0.16,
         subplot_titles=(
-            "force against energy gradient",
-            f"mismatch, max {np.abs(numeric - analytic).max() / scale:.1e}",
+            "finite differences against analytic force",
+            f"relative mismatch, max {np.abs(numeric - analytic).max() / scale:.1e}",
         ),
     )
     fig.add_trace(
@@ -447,42 +453,29 @@ def plot_gradient_check(output: Path, n: int = 300) -> None:
         row=1,
         col=1,
     )
-    fig.add_trace(
-        go.Scatter(
-            x=analytic,
-            y=numeric,
-            mode="markers",
-            marker={
-                "size": 7,
-                "color": members,
-                "cmin": 1,
-                "cmax": 4,
-                "colorscale": "Viridis",
-                "colorbar": {
-                    "title": {"text": "leaves"},
-                    "len": 0.43,
-                    "y": 1.0,
-                    "yanchor": "top",
-                    "dtick": 1,
-                },
-            },
-            showlegend=False,
-        ),
-        row=1,
-        col=1,
-    )
-    fig.update_xaxes(title_text="$\\text{analytic force } F$", row=1, col=1)
-    fig.update_yaxes(
-        title_text="$-\\partial U/\\partial x\\ \\text{(finite differences)}$",
-        row=1,
-        col=1,
-    )
+    # one colour per number of leaves a particle is blended into, named in the legend
+    palette = (_c("C0"), _c("C1"), _c("C2"), _c("C3"), _c("C4"))
+    for k, count in enumerate(np.unique(members)):
+        sel = members == count
+        fig.add_trace(
+            go.Scatter(
+                x=analytic[sel],
+                y=numeric[sel],
+                mode="markers",
+                marker={"size": 7, "color": palette[k % len(palette)]},
+                name=f"in {count} leaves",
+            ),
+            row=1,
+            col=1,
+        )
+    fig.update_xaxes(title_text="$\\text{analytic } F$", nticks=5, row=1, col=1)
+    fig.update_yaxes(title_text="$-\\partial U/\\partial x$", nticks=5, row=1, col=1)
 
     fig.add_trace(
         go.Scatter(
             y=np.abs(numeric - analytic) / scale,
             mode="markers",
-            marker={"size": 5},
+            marker={"size": 5, "color": _c("C0")},
             showlegend=False,
         ),
         row=2,
@@ -491,23 +484,37 @@ def plot_gradient_check(output: Path, n: int = 300) -> None:
     fig.add_hline(
         y=1e-8,
         line={"color": "black", "dash": "dash", "width": 0.8},
-        annotation_text="finite-difference noise level",
-        annotation_position="top left",
         row=2,
         col=1,
+    )
+    fig.add_annotation(
+        text="finite-difference noise",
+        x=0,
+        xref="x2 domain",
+        xanchor="left",
+        y=-8,
+        yref="y2",
+        yanchor="bottom",
+        showarrow=False,
     )
     fig.update_yaxes(
         type="log",
         range=[-13, -5],
-        dtick=1,
+        dtick=2,
         exponentformat="power",
         title_text="$|F_\\mathrm{fd} - F|/\\max|F|$",
         row=2,
         col=1,
     )
-    fig.update_xaxes(title_text="sample", row=2, col=1)
-    fig.update_layout(height=800)
-    save_figure(fig, output / "gradient_check", height=800)
+    fig.update_xaxes(title_text="sample", nticks=5, tickangle=0, row=2, col=1)
+    fig.update_layout(
+        title="The force is the exact energy gradient",
+        legend={"orientation": "h", "y": -0.12, "yanchor": "top", "x": 0},
+        width=600,
+        height=1000,
+        margin={"b": 100},
+    )
+    save_figure(fig, output / "gradient_check", width=600, height=1000)
 
 
 # -- 5, 6: conservation over time -------------------------------------------------
@@ -608,8 +615,8 @@ def plot_conservation(results, info, output: Path) -> None:
     fig.add_hline(y=0, line={"color": "black", "width": 0.5})
     fig.update_layout(
         title=(
-            f"$\\text{{Energy: }} N = {info['n']},\\ p = {info['order']},\\ "
-            f"\\theta = {info['theta']},\\ \\Delta t = {info['dt']}$"
+            f"Energy: N = {info['n']}, p = {info['order']}, "
+            f"θ = {info['theta']}, Δt = {info['dt']}"
         ),
         xaxis_title="time",
         yaxis_title="$(E - E_0)/|E_0|$",
@@ -633,7 +640,9 @@ def plot_conservation(results, info, output: Path) -> None:
         xaxis_title="time",
         yaxis_title="$\\text{net force}/\\sum |F|$",
         yaxis_type="log",
-        yaxis_dtick=1,
+        yaxis_dtick=_decade_step(
+            np.concatenate([np.maximum(r[4], 1e-18) for r in results])
+        ),
         yaxis_exponentformat="power",
         legend={"font": {"size": 10}},
     )
@@ -650,7 +659,8 @@ def plot_trajectories(results, info, output: Path) -> None:
     fig = make_subplots(
         rows=2,
         cols=1,
-        vertical_spacing=0.12,
+        vertical_spacing=0.1,
+        row_heights=[0.6, 0.4],
         subplot_titles=(
             f"trajectories, {conserving[0]}",
             "distance from the direct sum",
@@ -691,11 +701,19 @@ def plot_trajectories(results, info, output: Path) -> None:
         col=1,
     )
     fig.update_yaxes(
-        range=[-1.3, 1.3], constrain="domain", showgrid=False, row=1, col=1
+        range=[-1.3, 1.3],
+        constrain="domain",
+        showgrid=False,
+        title_text="$y$",
+        row=1,
+        col=1,
     )
+    fig.update_xaxes(title_text="$x$", row=1, col=1)
 
+    distances = []
     for label, color, times, _, _, hist in results[1:]:
         distance = np.sqrt(((hist - reference) ** 2).sum(axis=1)).max(axis=1)
+        distances.append(np.maximum(distance, 1e-17))
         fig.add_trace(
             go.Scatter(
                 x=times,
@@ -711,13 +729,21 @@ def plot_trajectories(results, info, output: Path) -> None:
     fig.update_yaxes(
         title_text="$\\max_i |x_i - x_{i,\\mathrm{direct}}|$",
         type="log",
-        dtick=1,
+        dtick=_decade_step(np.concatenate(distances)),
         exponentformat="power",
         row=2,
         col=1,
     )
-    fig.update_layout(legend={"font": {"size": 10}}, height=800)
-    save_figure(fig, output / "trajectories", height=800)
+    fig.update_xaxes(nticks=5, tickangle=0)
+    fig.update_yaxes(nticks=5)
+    # width and height set the aspect ratio of the web figure (the square map fills a phone)
+    fig.update_layout(
+        title="Every variant drifts away from the direct sum",
+        legend={"font": {"size": 10}},
+        width=600,
+        height=1000,
+    )
+    save_figure(fig, output / "trajectories", width=600, height=1000)
 
 
 def plot_gentle_trajectories(output: Path, steps: int = 2000):
@@ -754,25 +780,16 @@ def plot_gentle_trajectories(output: Path, steps: int = 2000):
         pos, vel, q, m, dt, steps, k_trap, conserving, every=2
     )
 
+    difference = np.sqrt(((hist_t - hist_d) ** 2).sum(axis=1)).max()
     fig = make_subplots(
         rows=2,
         cols=1,
-        vertical_spacing=0.12,
+        vertical_spacing=0.1,
+        row_heights=[0.6, 0.4],
         subplot_titles=(
-            "tree code over direct sum",
+            f"orbits, max difference {difference:.0e}",
             f"energy error; net force ≤ {net_t.max():.0e}",
         ),
-    )
-    fig.add_annotation(
-        text="max trajectory difference "
-        f"{np.sqrt(((hist_t - hist_d) ** 2).sum(axis=1)).max():.1e}",
-        xref="x domain",
-        yref="y domain",
-        x=0.5,
-        y=0.02,
-        xanchor="center",
-        yanchor="bottom",
-        showarrow=False,
     )
     fig.update_layout(shapes=_box_shapes(tree, color="rgb(153,153,153)", width=0.3))
     for i in range(n):
@@ -819,8 +836,14 @@ def plot_gentle_trajectories(output: Path, steps: int = 2000):
         col=1,
     )
     fig.update_yaxes(
-        range=[-1.5, 1.5], constrain="domain", showgrid=False, row=1, col=1
+        range=[-1.5, 1.5],
+        constrain="domain",
+        showgrid=False,
+        title_text="$y$",
+        row=1,
+        col=1,
     )
+    fig.update_xaxes(title_text="$x$", row=1, col=1)
 
     fig.add_trace(
         go.Scatter(
@@ -847,8 +870,15 @@ def plot_gentle_trajectories(output: Path, steps: int = 2000):
     fig.add_hline(y=0, line={"color": "black", "width": 0.5}, row=2, col=1)
     fig.update_xaxes(title_text="time", row=2, col=1)
     fig.update_yaxes(title_text="relative energy error", row=2, col=1)
-    fig.update_layout(legend={"font": {"size": 10}}, height=800)
-    save_figure(fig, output / "trajectories_gentle", height=800)
+    fig.update_xaxes(nticks=5, tickangle=0)
+    fig.update_yaxes(nticks=5)
+    fig.update_layout(
+        title="A ring of like charges: tree code on the direct sum",
+        legend={"font": {"size": 10}},
+        width=600,
+        height=1000,
+    )
+    save_figure(fig, output / "trajectories_gentle", width=600, height=1000)
     return times, hist_d, hist_t, tree, q
 
 
@@ -865,7 +895,8 @@ def animate_cloud(results, info, output: Path, frames: int = 160) -> None:
     fig = make_subplots(
         rows=2,
         cols=1,
-        vertical_spacing=0.12,
+        vertical_spacing=0.1,
+        row_heights=[0.6, 0.4],
         subplot_titles=(label, "energy error (thin: the other runs)"),
     )
     fig.update_layout(shapes=_box_shapes(tree, color="rgb(153,153,153)", width=0.3))
@@ -901,8 +932,14 @@ def animate_cloud(results, info, output: Path, frames: int = 160) -> None:
         col=1,
     )
     fig.update_yaxes(
-        range=[-1.3, 1.3], constrain="domain", showgrid=False, row=1, col=1
+        range=[-1.3, 1.3],
+        constrain="domain",
+        showgrid=False,
+        title_text="$y$",
+        row=1,
+        col=1,
     )
+    fig.update_xaxes(title_text="$x$", row=1, col=1)
 
     for _, col_, t_, d_, _, _ in results:
         fig.add_trace(
@@ -934,7 +971,16 @@ def animate_cloud(results, info, output: Path, frames: int = 160) -> None:
     fig.update_yaxes(
         title_text="relative energy error", range=[-lim, lim], row=2, col=1
     )
-    fig.update_layout(legend={"font": {"size": 10}}, height=880, margin={"b": 120})
+    fig.update_xaxes(nticks=5, tickangle=0)
+    fig.update_yaxes(nticks=5)
+    # width and height set the aspect ratio of the web figure (the square map fills a phone)
+    fig.update_layout(
+        title="A trapped cloud under the conserving tree code",
+        legend={"font": {"size": 10}},
+        width=600,
+        height=1050,
+        margin={"b": 120},
+    )
 
     trace_pos_plus, trace_pos_minus = 0, 1
     trace_energy = len(results) + 2
@@ -954,7 +1000,7 @@ def animate_cloud(results, info, output: Path, frames: int = 160) -> None:
         )
     fig.frames = frame_list
     _add_player(fig, frame_list, duration=40, labels=[f"{times[k]:.2f}" for k in idx])
-    save_figure(fig, output / "cloud", frame=-1, height=880)
+    save_figure(fig, output / "cloud", frame=-1, width=600, height=1050)
 
 
 def animate_orbits(
@@ -984,7 +1030,7 @@ def animate_orbits(
                 data=data,
                 traces=list(range(2 * n + 1)),
                 layout=go.Layout(
-                    title=f"t = {times[k]:.2f}, max |x − x_direct| = {dist:.1e}"
+                    title=f"t = {times[k]:.2f}: {dist:.1e} from the direct sum"
                 ),
             )
         )
@@ -1023,9 +1069,16 @@ def animate_orbits(
         )
     )
     fig.update_xaxes(
-        range=[-1.2, 1.2], scaleanchor="y", constrain="domain", showgrid=False
+        range=[-1.2, 1.2],
+        scaleanchor="y",
+        constrain="domain",
+        showgrid=False,
+        title_text="$x$",
+        nticks=5,
     )
-    fig.update_yaxes(range=[-1.2, 1.2], constrain="domain", showgrid=False)
+    fig.update_yaxes(
+        range=[-1.2, 1.2], constrain="domain", showgrid=False, title_text="$y$"
+    )
     fig.frames = frame_list
     fig.update_layout(title=frame_list[0].layout.title.text, margin={"b": 120})
     _add_player(fig, frame_list, duration=40)
@@ -1094,8 +1147,9 @@ def animate_membership(output: Path, frames: int = 150) -> None:
     fig = make_subplots(
         rows=2,
         cols=1,
-        vertical_spacing=0.12,
-        subplot_titles=("tracer (red) and leaves", "membership weights"),
+        vertical_spacing=0.1,
+        row_heights=[0.55, 0.45],
+        subplot_titles=("tracer (dot) and its leaves", "membership weights"),
     )
     fig.update_layout(shapes=frame_list[0].layout.shapes)
     fig.add_trace(
@@ -1126,7 +1180,7 @@ def animate_membership(output: Path, frames: int = 150) -> None:
             x=first_tracer.x,
             y=first_tracer.y,
             mode="markers",
-            marker={"size": 10, "color": MPL_COLORS["C3"]},
+            marker={"size": 10, "color": "black"},
             showlegend=False,
         ),
         row=1,
@@ -1151,11 +1205,24 @@ def animate_membership(output: Path, frames: int = 150) -> None:
         col=1,
     )
     fig.update_yaxes(
-        range=[-0.45, 0.6], constrain="domain", showgrid=False, row=1, col=1
+        range=[-0.45, 0.6],
+        constrain="domain",
+        showgrid=False,
+        title_text="$y$",
+        row=1,
+        col=1,
     )
+    fig.update_xaxes(title_text="$x$", row=1, col=1)
     fig.update_yaxes(range=[0, 1.05], title_text="$\\text{weight } w_L$", row=2, col=1)
+    fig.update_xaxes(nticks=5, tickangle=0)
+    fig.update_yaxes(nticks=5)
     fig.frames = frame_list
-    fig.update_layout(height=880, margin={"b": 120})
+    fig.update_layout(
+        title="The leaf weights of a tracer sum to one",
+        width=600,
+        height=1000,
+        margin={"b": 120},
+    )
     _add_player(
         fig,
         frame_list,
@@ -1163,7 +1230,7 @@ def animate_membership(output: Path, frames: int = 150) -> None:
         prefix="tracer at x = ",
         labels=[f"{z.real:.2f}" for z in track],
     )
-    save_figure(fig, output / "membership", frame=-1, height=880)
+    save_figure(fig, output / "membership", frame=-1, width=600, height=1000)
 
 
 def animate_tree(
@@ -1232,15 +1299,17 @@ def animate_tree(
         created.append(len(new) if frame_i else 0)
         removed.append(len(gone))
         title = f"t = {t:.2f}: {len(current)} leaves, depth {int(tree.depth.max())}"
+        head = {"size": [0] * (len(times) - 1) + [6]}
         frame_list.append(
             go.Frame(
                 name=f"{t:.2f}",
                 data=[
                     go.Scatter(x=x[0, q > 0], y=x[1, q > 0]),
                     go.Scatter(x=x[0, q < 0], y=x[1, q < 0]),
-                    go.Scatter(x=times.copy(), y=counts.copy()),
-                    go.Scatter(x=times.copy(), y=created.copy()),
-                    go.Scatter(x=times.copy(), y=removed.copy()),
+                    # a dot at the newest point, so that the first frame shows something
+                    go.Scatter(x=times.copy(), y=counts.copy(), marker=head),
+                    go.Scatter(x=times.copy(), y=created.copy(), marker=head),
+                    go.Scatter(x=times.copy(), y=removed.copy(), marker=head),
                 ],
                 traces=[dots_plus, dots_minus, line_leaves, line_new, line_gone],
                 layout=go.Layout(shapes=shapes, title=title),
@@ -1251,7 +1320,8 @@ def animate_tree(
     fig = make_subplots(
         rows=2,
         cols=1,
-        vertical_spacing=0.12,
+        vertical_spacing=0.1,
+        row_heights=[0.6, 0.4],
         subplot_titles=("", f"leaf count, capacity {capacity}"),
     )
     for trace, color in ((dots_plus, MPL_COLORS["C3"]), (dots_minus, MPL_COLORS["C0"])):
@@ -1275,8 +1345,14 @@ def animate_tree(
         col=1,
     )
     fig.update_yaxes(
-        range=[-1.6, 1.6], constrain="domain", showgrid=False, row=1, col=1
+        range=[-1.6, 1.6],
+        constrain="domain",
+        showgrid=False,
+        title_text="$y$",
+        row=1,
+        col=1,
     )
+    fig.update_xaxes(title_text="$x$", row=1, col=1)
     for trace, color, name in (
         (line_leaves, "black", "leaves"),
         (line_new, MPL_COLORS["C2"], "created this frame"),
@@ -1286,8 +1362,9 @@ def animate_tree(
             go.Scatter(
                 x=first[trace].x,
                 y=first[trace].y,
-                mode="lines",
+                mode="lines+markers",
                 line={"color": color, "width": 1.2},
+                marker={"color": color, **first[trace].marker.to_plotly_json()},
                 name=name,
             ),
             row=2,
@@ -1297,16 +1374,19 @@ def animate_tree(
         title_text="time", range=[0, frames * steps_per_frame * dt], row=2, col=1
     )
     fig.update_yaxes(title_text="count", range=[0, max(counts) * 1.1], row=2, col=1)
+    fig.update_xaxes(nticks=5, tickangle=0)
+    fig.update_yaxes(nticks=5)
     fig.frames = frame_list
     fig.update_layout(
         legend={"font": {"size": 9}},
         shapes=frame_list[0].layout.shapes,
         title=frame_list[0].layout.title.text,
-        height=880,
+        width=600,
+        height=1050,
         margin={"b": 120},
     )
     _add_player(fig, frame_list, duration=50)
-    save_figure(fig, output / "tree", frame=-1, height=880)
+    save_figure(fig, output / "tree", frame=-1, width=600, height=1050)
 
 
 # -- main -------------------------------------------------------------------------

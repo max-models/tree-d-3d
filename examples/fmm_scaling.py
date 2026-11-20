@@ -128,9 +128,9 @@ def plot_order_accuracy(output: Path, n: int = 2000) -> None:
     fig.update_xaxes(title_text="expansion order")
     fig.update_yaxes(
         type="log",
-        dtick=1,
+        dtick=3,
         exponentformat="power",
-        title_text="max field error relative to the direct sum",
+        title_text="max relative field error",
     )
     fig.update_layout(
         title="Multipole expansions converge almost exponentially in the order",
@@ -172,9 +172,9 @@ def plot_theta_accuracy(output: Path, n: int = 2000) -> None:
     fig.update_xaxes(title_text="$\\text{opening angle } \\theta$")
     fig.update_yaxes(
         type="log",
-        dtick=1,
+        dtick=3,
         exponentformat="power",
-        title_text="max field error relative to the direct sum",
+        title_text="max relative field error",
     )
     fig.update_layout(
         title="A larger θ is faster but less accurate",

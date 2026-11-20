@@ -26,7 +26,8 @@ sheath -- while the bulk stays quasi-neutral. Saves one figure per claim:
 5. ``particle_loss``: electrons and ions remaining against time; the walls are a
    real particle sink, with the bulk only partly depleted over the plotted window.
 6. ``sheath_formation``: an (x, v_x) phase-space animation of both species, from
-   the initial uniform state to the developed sheath.
+   the initial uniform state to the developed sheath, with the particle counts in the
+   top right corner.
 
 Usage::
 
@@ -365,9 +366,8 @@ def plot_density_profile(output: Path, profile: dict) -> None:
     fig.update_yaxes(title_text="particles per length (time-averaged)")
     fig.update_layout(
         title=(
-            r"$\text{Densities, domain}\approx "
-            f"{profile['x'][-1] / profile['lam_D']:.0f}"
-            r"\,\lambda_D\ \text{wide}$"
+            "Densities, domain ≈ "
+            f"{profile['x'][-1] / profile['lam_D']:.0f} Debye lengths wide"
         ),
         legend={"font": {"size": 10}},
     )
@@ -450,7 +450,7 @@ def animate_sheath_formation(
         for _ in range(steps_per_frame):
             sheath.step()
         n_e, n_i = sheath.counts()
-        title = f"t = {sheath.time:.2f}: Nₑ = {n_e}, Nᵢ = {n_i}"
+        status = f"Nₑ = {n_e}, Nᵢ = {n_i}"
         data = []
         for species in (ELECTRON, ION):
             sel = sheath.species == species
@@ -460,7 +460,20 @@ def animate_sheath_formation(
                 name=f"{sheath.time:.2f}",
                 data=data,
                 traces=[0, 1],
-                layout=go.Layout(title=title),
+                layout=go.Layout(
+                    annotations=[
+                        {
+                            "x": 1,
+                            "y": 1,
+                            "xref": "paper",
+                            "yref": "paper",
+                            "xanchor": "right",
+                            "yanchor": "top",
+                            "text": status,
+                            "showarrow": False,
+                        }
+                    ]
+                ),
             )
         )
 
@@ -484,8 +497,13 @@ def animate_sheath_formation(
     fig.update_yaxes(title_text="$v_x$", range=[-v_scale, v_scale])
     fig.update_layout(legend={"font": {"size": 10}})
     fig.frames = frame_list
-    if frame_list:
-        fig.update_layout(title=frame_list[0].layout.title.text)
+    # a fixed title (the time is on the slider, the particle counts in a note in the
+    # plot's top right corner that the frames update), so that the page can show the
+    # title above the plot
+    fig.update_layout(
+        title="Phase space of the forming sheath",
+        annotations=list(frame_list[0].layout.annotations) if frame_list else [],
+    )
     _add_player(fig, frame_list, duration=60, prefix="t = ")
     save_figure(fig, output / "sheath_formation", frame=-1)
 

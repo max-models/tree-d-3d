@@ -161,7 +161,7 @@ def cloud(n, seed, box=1.0):
 
 
 def log_ticks(fig: go.Figure, axis: str = "y") -> None:
-    """Decade ticks on a log axis spanning two decades or more, else ``D2`` minor labels."""
+    """Decade ticks on a log axis spanning two decades or more, else 1-2-5 ticks."""
     values = np.concatenate(
         [np.asarray(getattr(trace, axis), dtype=float) for trace in fig.data]
     )
@@ -170,8 +170,17 @@ def log_ticks(fig: go.Figure, axis: str = "y") -> None:
     update = fig.update_yaxes if axis == "y" else fig.update_xaxes
     if decades >= 2:
         update(dtick=1, exponentformat="power")
-    else:
-        update(dtick="D2")
+    elif values.size:
+        # explicit 1-2-5 ticks with their full values: Plotly's "D2" labels the minor
+        # ticks with their leading digit only ("10k, 5, 2")
+        low, high = np.floor(np.log10(values.min())), np.ceil(np.log10(values.max()))
+        ticks = [
+            m * 10.0**e
+            for e in np.arange(low, high + 1)
+            for m in (1, 2, 5)
+            if values.min() / 1.5 <= m * 10.0**e <= values.max() * 1.5
+        ]
+        update(tickvals=ticks, ticktext=[f"{t:,.10g}" for t in ticks])
 
 
 # -- 1: accuracy per parameter -------------------------------------------------------------
@@ -264,9 +273,7 @@ def plot_cluster_size(output: Path, quick: bool) -> None:
     fig.update_xaxes(type="log", title_text="sources in the cell", tickvals=sizes)
     fig.update_yaxes(type="log", title_text="Taylor error / rational error")
     log_ticks(fig)
-    fig.update_layout(
-        title=r"$\text{Rational gain against cell size}\ (p = 24,\ m = 12)$"
-    )
+    fig.update_layout(title="Rational gain against cell size (p = 24, m = 12)")
     save_figure(fig, output / "cluster_size")
 
 
@@ -411,6 +418,7 @@ def plot_hierarchical(output: Path, quick: bool) -> None:
                 mode="lines+markers",
                 line={"color": color},
                 name=rf"$\text{{Taylor}},\ \theta = {theta}$",
+                showlegend=False,
             )
         )
         fig.add_trace(
@@ -421,6 +429,7 @@ def plot_hierarchical(output: Path, quick: bool) -> None:
                 line={"color": color, "dash": "dot"},
                 marker={"symbol": "diamond"},
                 name=rf"$\text{{flat AAA}},\ \theta = {theta}$",
+                showlegend=False,
             )
         )
         fig.add_trace(
@@ -431,13 +440,42 @@ def plot_hierarchical(output: Path, quick: bool) -> None:
                 line={"color": color, "dash": "dash"},
                 marker={"symbol": "square"},
                 name=rf"$\text{{hierarchical AAA}},\ \theta = {theta}$",
+                showlegend=False,
             )
         )
-    fig.update_xaxes(title_text="particles per cell (leaves first)", tickangle=0)
+    # a short legend: the line style names the scheme, the colour names theta
+    for name, dash, symbol in (
+        ("Taylor", "solid", "circle"),
+        ("flat AAA", "dot", "diamond"),
+        ("hierarchical AAA", "dash", "square"),
+    ):
+        fig.add_trace(
+            go.Scatter(
+                x=[None],
+                y=[None],
+                mode="lines+markers",
+                line={"color": "black", "dash": dash},
+                marker={"symbol": symbol},
+                name=name,
+            )
+        )
+    for theta, color in zip(thetas, (COLORS["C0"], COLORS["C3"])):
+        fig.add_trace(
+            go.Scatter(
+                x=[None],
+                y=[None],
+                mode="lines",
+                line={"color": color},
+                name=rf"$\theta = {theta}$",
+            )
+        )
+    fig.update_xaxes(
+        title_text="particles per cell (leaves first)", type="category", tickangle=0
+    )
     fig.update_yaxes(type="log", title_text="max far-field error over cells")
     log_ticks(fig)
     fig.update_layout(
-        title=rf"$\text{{Up the tree}}:\ N = {n},\ p = {p},\ m = {m}$",
+        title=f"Up the tree: N = {n}, p = {p}, m = {m}",
         legend={"font": {"size": 9}},
     )
     save_figure(fig, output / "hierarchical")
@@ -467,7 +505,7 @@ def plot_pair_counts(output: Path, quick: bool) -> None:
             y=m2l,
             mode="lines+markers",
             line={"color": COLORS["C0"]},
-            name="far-field (M2L) cell pairs",
+            name="far field (M2L)",
         )
     )
     fig.add_trace(
@@ -476,13 +514,13 @@ def plot_pair_counts(output: Path, quick: bool) -> None:
             y=p2p,
             mode="lines+markers",
             line={"color": COLORS["C1"]},
-            name="near-field (P2P) leaf pairs",
+            name="near field (P2P)",
         )
     )
     fig.update_xaxes(title_text=r"$\theta$")
     fig.update_yaxes(type="log", title_text="pairs")
     log_ticks(fig)
-    fig.update_layout(title=rf"$\text{{Cell pairs against}}\ \theta\ (N = {n})$")
+    fig.update_layout(title=f"Cell and leaf pairs against θ (N = {n})")
     save_figure(fig, output / "pair_counts")
 
 
