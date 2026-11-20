@@ -112,7 +112,7 @@ show_missing = true
 [tool.uv.sources]
 cunumpy = { git = "https://github.com/max-models/cunumpy", branch = "devel" }
 methodcard = { git = "https://github.com/max-models/methodcard", branch = "devel" }
-plasma-plots = { git = "https://github.com/max-models/plasma-plots", branch = "devel" }
+plasma-plots = { git = "https://github.com/max-models/plasma-plots", branch = "quadtree-plots" }
 plasmacoll = { git = "https://github.com/max-models/plasmacoll", branch = "devel" }
 scope-profiler = { git = "https://github.com/max-models/scope-profiler", branch = "devel" }
 simgeometry = { git = "https://github.com/max-models/simgeometry", branch = "devel" }
