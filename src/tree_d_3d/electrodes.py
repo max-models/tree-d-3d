@@ -721,7 +721,7 @@ class BoundaryIntegralElectrodes:
             from simgeometry import Polygon
 
             polygon = Polygon(
-                vertices=[tuple(v) for v in np.asarray(conductor.vertices, float).T]
+                vertices=np.ascontiguousarray(np.asarray(conductor.vertices, float).T)
             )
 
             def test(points, polygon=polygon):
