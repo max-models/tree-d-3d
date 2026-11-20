@@ -153,8 +153,11 @@ def test_polygon_conductor_interior_converges_to_equipotential_and_field_free():
             conductors_from_shape(l_shape, 1.0, panel), k_e=1.0
         )
         electrodes.solve()
-        phi, field = electrodes.probe(inside)
+        # the panel sums themselves: probe returns the exact values inside
+        phi, field = electrodes.panel_field(inside)
         errors.append(max(np.abs(phi - 1.0).max(), np.abs(field).max()))
+        exact_phi, exact_field = electrodes.probe(inside)
+        assert np.all(exact_phi == 1.0) and np.all(exact_field == 0.0)
     assert errors[1] < 5e-5
     assert errors[0] / errors[1] > 4.0
 

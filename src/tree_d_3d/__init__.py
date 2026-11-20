@@ -47,7 +47,7 @@ from tree_d_3d.strip import GroundedStripField
 
 sp.register_opt_in_tag(PROFILE_TAG)
 
-__version__ = "0.1.0"  # x-release-please-version
+__version__ = "0.2.0"  # x-release-please-version
 
 __all__ = [
     "K_E",
