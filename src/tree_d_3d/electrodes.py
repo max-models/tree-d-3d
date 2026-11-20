@@ -23,11 +23,16 @@ plane domain face (`Face`, Neumann or Dirichlet, by mirror images) take the plac
 stacked and mirrored copies of the electrodes an extraction cell would otherwise need.
 
 Up to `DIRECT_LIMIT` panels the system is solved directly, by an LU factorisation done
-once per geometry and reused by every `BoundaryIntegralElectrodes.solve`. Above it, in
-free space or beside a face, ``solver="auto"`` iterates instead: GMRES, preconditioned by
-the exact panel matrix of each run of consecutive panels (block Jacobi), with each product ``S Q`` a fast multipole sum over the Gauss
-nodes (`tree_d_3d.FlatQuadtree.fmm`) plus the sparse exact near corrections, so memory
-and time grow almost linearly with the panels instead of as ``P**2`` and ``P**3``.
+once per geometry and reused by every `BoundaryIntegralElectrodes.solve`. Above it
+``solver="auto"`` iterates instead: GMRES, preconditioned by the exact panel matrix of each
+run of consecutive panels (block Jacobi), with each product ``S Q`` a fast multipole sum
+over the Gauss nodes (`tree_d_3d.FlatQuadtree.fmm`) plus the sparse exact near
+corrections, so memory and time grow almost linearly with the panels instead of as
+``P**2`` and ``P**3``. Large sums at probes and over free charges walk a multipole tree
+(above `TREE_PAIRS` pairs). With a period the fast sums run in the plane mapped by
+``z -> exp(2 pi z / period)``, where the row of copies of a charge becomes one charge
+(`BoundaryIntegralElectrodes._periodic_tree_sum`), for points within `MAP_REACH` periods
+of the conductors along x.
 
 The log kernel is the one `tree_d_3d.FlatQuadtree` and `tree_d_3d.direct_field`
 use with ``kernel="log"``: potential ``-2 q ln r`` and field ``2 q d / r**2`` per unit
@@ -68,6 +73,10 @@ FMM_THETA: float = 0.7
 FMM_LEAF: int = 16
 #: Consecutive panels of a conductor per block of the GMRES preconditioner.
 PRECONDITIONER_BLOCK: int = 256
+#: With a period, the fast sums map the plane by ``exp(2 pi z / period)``; they take points
+#: within this many periods of the conductors along x (the map's range is ``exp(2 pi`` this),
+#: farther ones fall back to the direct periodic sum.
+MAP_REACH: float = 8.0
 
 
 def _segment_rules() -> dict:
@@ -503,9 +512,10 @@ class BoundaryIntegralElectrodes:
     midpoint rule.
 
     ``solver`` is ``"direct"`` (dense LU), ``"gmres"`` (fast multipole products,
-    without a period; converged to ``tolerance`` in at most ``max_iterations``, with
-    ``fmm_order`` expansion terms) or ``"auto"``, which iterates above
-    `DIRECT_LIMIT` panels. ``iterations`` counts the last solve's GMRES steps.
+    converged to ``tolerance`` in at most ``max_iterations``, with ``fmm_order``
+    expansion terms) or ``"auto"``, which iterates above `DIRECT_LIMIT` panels.
+    ``iterations`` counts the last solve's GMRES steps. Sums over more than
+    `TREE_PAIRS` pairs (probes, free charges) walk a multipole tree too.
 
     ``period`` makes the geometry periodic along y: every charge, induced or free,
     stands for a row of copies ``period`` apart, summed in closed form by
@@ -780,6 +790,14 @@ class BoundaryIntegralElectrodes:
                 )
         return matrix + self._correction[block][:, block].toarray()
 
+    def _mapped(self, points: np.ndarray):
+        """``exp(2 pi (x - x0 + i y) / period)``: complex ``(M,)`` and as ``(2, M)`` points."""
+        assert self.period is not None
+        z = np.exp(
+            (2.0 * np.pi / self.period) * ((points[0] - self._map_x0) + 1j * points[1])
+        )
+        return z, np.stack((z.real, z.imag))
+
     def _prepare_iterative(self) -> None:
         """The sparse near corrections and the block preconditioner of the GMRES solve.
 
@@ -814,11 +832,26 @@ class BoundaryIntegralElectrodes:
         else:
             self._fmm_points = np.concatenate((nodes, self.midpoints), axis=1)
             self._fmm_targets = nodes.shape[1] + np.arange(self.num_panels)
-        low = self._fmm_points.min(axis=1)
-        high = self._fmm_points.max(axis=1)
+        # with a period the products are free-space sums over the mapped points
+        self._fmm_plane = (
+            self._fmm_points
+            if self.period is None
+            else self._mapped(self._fmm_points)[1]
+        )
+        low = self._fmm_plane.min(axis=1)
+        high = self._fmm_plane.max(axis=1)
         half = 0.5 * float(np.max(high - low)) * (1.0 + 1e-6) + 1e-300
         centre = 0.5 * (low + high)
         self._fmm_quad = Quad(float(centre[0]), float(centre[1]), half)
+
+    def _mappable(self, *point_sets: np.ndarray) -> bool:
+        """Whether every point lies within `MAP_REACH` periods of the conductors along x."""
+        assert self.period is not None
+        reach = MAP_REACH * self.period
+        return all(
+            not p.shape[1] or float(np.abs(p[0] - self._map_x0).max()) <= reach
+            for p in point_sets
+        )
 
     def __init__(
         self,
@@ -836,11 +869,6 @@ class BoundaryIntegralElectrodes:
     ) -> None:
         if solver not in ("auto", "direct", "gmres"):
             raise ValueError("solver must be 'auto', 'direct' or 'gmres'")
-        if solver == "gmres" and period is not None:
-            raise ValueError(
-                "the iterative solver sums in free space; use solver='direct' with a "
-                "period"
-            )
         if not 0 < tolerance < 1:
             raise ValueError("tolerance must lie in (0, 1)")
         if not conductors:
@@ -933,13 +961,22 @@ class BoundaryIntegralElectrodes:
         self._shifts = (
             (0.0,) if self.period is None else (-self.period, 0.0, self.period)
         )
+        # the centre of the conductors along x, where the periodic map is centred
+        self._map_x0 = 0.5 * float(
+            np.min(np.minimum(self.starts[0], self.ends[0]))
+            + np.max(np.maximum(self.starts[0], self.ends[0]))
+        )
         #: the potential the conductors' potentials are measured from: a Dirichlet face's
         self.offset = face.potential if face is not None else 0.0
+        mappable = self.period is None or self._mappable(self.starts, self.ends)
+        if solver == "gmres" and not mappable:
+            raise ValueError(
+                f"with a period the iterative solver needs the conductors within "
+                f"{MAP_REACH} periods along x; use solver='direct'"
+            )
         if solver == "auto":
             solver = (
-                "gmres"
-                if self.period is None and self.num_panels > DIRECT_LIMIT
-                else "direct"
+                "gmres" if mappable and self.num_panels > DIRECT_LIMIT else "direct"
             )
         #: ``"direct"`` (dense LU) or ``"gmres"`` (FMM matrix-vector products)
         self.solver = solver
@@ -961,15 +998,72 @@ class BoundaryIntegralElectrodes:
         self._source_positions = np.zeros((2, 0))
         self._source_charges = np.zeros(0)
 
+    def _periodic_tree_sum(self, points, sources, charges, key):
+        """A periodic sum as a free-space one over the mapped points.
+
+        With ``z = exp(2 pi (x - x0 + i y) / P)`` the row kernel is
+        ``G_P = -ln|z_t - z_s|^2 + 2 pi (x_t + x_s - 2 x0) / P + 2 ln(2 pi / P)``: a log sum
+        over the mapped sources (a multipole tree, kept for sources that never move)
+        and terms linear in ``x``. The field follows from ``dz/dx = (2 pi / P) z``. A
+        target on a source drops that pair with its linear terms, which leaves the
+        other periods only (the remainder, zero there), as `_periodic_sum` does.
+        """
+        assert self.period is not None
+        k = 2.0 * np.pi / self.period
+        z_t, mapped_t = self._mapped(points)
+        tree = self._trees.get(("periodic", key)) if key is not None else None
+        if tree is None:
+            _, mapped_s = self._mapped(sources)
+            low, high = mapped_s.min(axis=1), mapped_s.max(axis=1)
+            centre = 0.5 * (low + high)
+            half = 0.5 * float(np.max(high - low)) * (1.0 + 1e-9) + 1e-300
+            tree = FlatQuadtree(
+                mapped_s,
+                charges,
+                Quad(float(centre[0]), float(centre[1]), half),
+                kernel="log",
+                order=self.fmm_order,
+                leaf_capacity=FMM_LEAF,
+            )
+            if key is not None:
+                self._trees[("periodic", key)] = tree
+        else:
+            tree.set_charges(charges)
+        distance, nearest = KDTree(sources.T).query(points.T)
+        exclude = np.where(distance == 0.0, nearest, -1).astype(np.int64)
+        phi_z, field_z = tree.evaluate(mapped_t, exclude=exclude, theta=FMM_THETA)
+        phi_z, field_z = np.asarray(phi_z), np.asarray(field_z)
+        total = float(np.sum(charges))
+        x_t = points[0] - self._map_x0
+        phi = (
+            phi_z
+            + k * total * x_t
+            + k * float(np.sum(charges * (sources[0] - self._map_x0)))
+            + 2.0 * total * np.log(k)
+        )
+        complex_field = (field_z[0] - 1j * field_z[1]) * k * z_t - k * total
+        dropped = np.flatnonzero(exclude >= 0)
+        if dropped.size:
+            q = charges[exclude[dropped]]
+            phi[dropped] -= q * (2.0 * k * x_t[dropped] + 2.0 * np.log(k))
+            complex_field[dropped] += k * q
+        return phi, np.stack((complex_field.real, -complex_field.imag))
+
     def _periodic_sum(
-        self, points: np.ndarray, sources: np.ndarray, charges: np.ndarray
+        self, points: np.ndarray, sources: np.ndarray, charges: np.ndarray, key=None
     ) -> tuple[np.ndarray, np.ndarray]:
-        """`periodic_log_kernel` summed over ``sources``; coincident pairs give zero."""
+        """`periodic_log_kernel` summed over ``sources``; coincident pairs give zero.
+
+        Above `TREE_PAIRS` pairs, and within `MAP_REACH` periods, by the mapped tree
+        (`_periodic_tree_sum`), otherwise directly, in chunks.
+        """
         m = points.shape[1]
         phi = np.zeros(m)
         field = np.zeros((2, m))
         if not sources.shape[1]:
             return phi, field
+        if m * sources.shape[1] > TREE_PAIRS and self._mappable(points, sources):
+            return self._periodic_tree_sum(points, sources, charges, key)
         rows = max(1, _PAIRS_PER_CHUNK // sources.shape[1])
         for first in range(0, m, rows):
             block = slice(first, first + rows)
@@ -1033,7 +1127,7 @@ class BoundaryIntegralElectrodes:
                 points, sources, sign * charges, kernel="log", exclude=exclude
             )
             return np.array(phi), np.array(field)
-        return self._periodic_sum(points, sources, sign * charges)
+        return self._periodic_sum(points, sources, sign * charges, key=key)
 
     def _precondition(self, residual: np.ndarray) -> np.ndarray:
         """The block-Jacobi solve (`_prepare_iterative`)."""
@@ -1058,7 +1152,7 @@ class BoundaryIntegralElectrodes:
         tree = getattr(self, "_fmm_tree", None)
         if tree is None:
             tree = self._fmm_tree = FlatQuadtree(
-                self._fmm_points,
+                self._fmm_plane,
                 sources,
                 self._fmm_quad,
                 kernel="log",
@@ -1068,7 +1162,23 @@ class BoundaryIntegralElectrodes:
         else:
             tree.set_charges(sources)
         phi, _ = tree.fmm(theta=FMM_THETA)
-        return np.asarray(phi)[self._fmm_targets] + self._correction @ charge
+        phi = np.asarray(phi)[self._fmm_targets]
+        if self.period is not None:
+            # the terms of the row kernel linear in x (`_periodic_tree_sum`); a target's
+            # own node (odd far_points) is left out with its linear terms
+            k = 2.0 * np.pi / self.period
+            x = self._fmm_points[0] - self._map_x0
+            total = float(np.sum(sources))
+            x_t = x[self._fmm_targets]
+            own = sources[self._fmm_targets]
+            phi = (
+                phi
+                + k * total * x_t
+                + k * float(np.sum(sources * x))
+                + 2.0 * total * np.log(k)
+                - own * (2.0 * k * x_t + 2.0 * np.log(k))
+            )
+        return phi + self._correction @ charge
 
     @sp.profile("tree_d_3d.electrodes.gmres", tags=_PROFILE_TAGS)
     def _solve_iterative(self, rhs: np.ndarray) -> np.ndarray:
