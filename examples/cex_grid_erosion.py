@@ -591,7 +591,9 @@ def main(argv: list[str] | None = None) -> Path:
         )
     # one shared y title, on the middle panel
     fig.update_yaxes(title_text="$j_\\mathrm{CEX}\\ (\\mathrm{A/m^2})$", row=2, col=1)
-    fig.update_layout(title="Where the slow ions hit the accel grid", height=1200)
+    fig.update_layout(
+        title="Where the slow ions hit the accel grid", width=600, height=1200
+    )
     save_figure(fig, output / "impact_map", width=600, height=1200)
 
     fig = make_subplots(
@@ -623,7 +625,9 @@ def main(argv: list[str] | None = None) -> Path:
     # one shared y title: both panels show the same quantity
     fig.update_yaxes(title_text="fraction of the flux", row=1, col=1)
     fig.update_layout(
-        title="Impacts of charge-exchange ions on the accel grid", height=800
+        title="Impacts of charge-exchange ions on the accel grid",
+        width=600,
+        height=800,
     )
     save_figure(fig, output / "impact_distributions", width=600, height=800)
     mean_energy = np.sum(w_accel * energy) / max(w_accel.sum(), 1e-300)
@@ -655,7 +659,9 @@ def main(argv: list[str] | None = None) -> Path:
     # one shared y title, on the middle panel
     fig.update_yaxes(title_text="erosion (µm per 1000 h)", row=2, col=1)
     fig.update_layout(
-        title="Estimated sputter erosion of the accel grid's faces", height=1200
+        title="Estimated sputter erosion of the accel grid's faces",
+        width=600,
+        height=1200,
     )
     save_figure(fig, output / "erosion", width=600, height=1200)
     peaks = {

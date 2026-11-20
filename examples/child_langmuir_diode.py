@@ -398,7 +398,9 @@ def main(argv: list[str] | None = None) -> Path:
     fig.update_yaxes(title_text="$\\phi / V$", row=1, col=1)
     fig.update_yaxes(title_text="$E_x d / V$", row=2, col=1)
     fig.update_layout(
-        title="Potential and field along the gap at the emitter's centre", height=760
+        title="Potential and field along the gap at the emitter's centre",
+        width=600,
+        height=760,
     )
     save_figure(fig, output / "potential", width=600, height=760)
 

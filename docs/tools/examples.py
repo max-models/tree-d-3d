@@ -321,7 +321,15 @@ def web_assets(source: Path, alt: str) -> list[Path]:
     )
     if not fresh(web) or not all(fresh(poster) for poster in posters):
         figure = pio.read_json(source)
-        web.write_text(json.dumps(web_figure(figure, alt=alt), separators=(",", ":")))
+        # a figure saved by plasma-plots is a web figure already: keep its hints (the aspect
+        # ratio from its layout size, which the web figure no longer carries)
+        meta = figure.layout.meta if isinstance(figure.layout.meta, dict) else {}
+        aspect = (meta.get("web") or {}).get("aspect")
+        web.write_text(
+            json.dumps(
+                web_figure(figure, alt=alt, aspect=aspect), separators=(",", ":")
+            )
+        )
         try:
             save_posters(figure, stem)
         except Exception as error:  # noqa: BLE001  (kaleido or its browser missing)
