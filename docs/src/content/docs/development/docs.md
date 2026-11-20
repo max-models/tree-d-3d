@@ -55,7 +55,8 @@ to rerun all of them.
 
 Add a script to `examples/`. Draw each figure with Plotly (`plotly.graph_objects`) and save it
 with `plasma_plots.save_figure(fig, output / name)`, which writes `<name>.plotly.json` (embedded
-as the interactive chart), `<name>.png` (a static fallback, not used by the docs) and `<name>.html`
+as a web figure on the theme's `PlotlyFigure`, in the site's light or dark colours, with its legend
+below the plot on a phone, and light and dark posters drawn by kaleido), `<name>.png` (a static fallback, not used by the docs) and `<name>.html`
 (a standalone copy). An animation is a figure with `frames` and a slider/play button in its
 `layout` (see `plasma_plots.heatmap_movie` for the pattern, or build `go.Frame`s by hand); the page
 shows it under "Animations" instead of "Figures".

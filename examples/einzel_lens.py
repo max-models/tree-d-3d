@@ -56,6 +56,7 @@ import argparse
 from pathlib import Path
 
 import numpy as np
+import plotly.colors
 import plotly.graph_objects as go
 from plasma_plots import save_figure
 from simgeometry import Aperture2D
@@ -219,7 +220,7 @@ def main(argv: list[str] | None = None) -> Path:
     # 2. focusing trajectories, the decelerating (stronger) polarity
     fig = go.Figure()
     crossings = []
-    for y0 in y0s:
+    for y0, color in zip(y0s, plotly.colors.qualitative.Plotly, strict=False):
         xs, _ = trace(lens, y0, VX0, x_final, dt)
         crossings.append(focus_crossing(xs))
         fig.add_trace(
@@ -227,8 +228,9 @@ def main(argv: list[str] | None = None) -> Path:
                 x=xs[0],
                 y=xs[1],
                 mode="lines",
-                line={"color": COLORS["C0"]},
-                name=f"y0 = {y0}",
+                line={"color": color},
+                name=f"$y_0 = {y0:g}$",
+                legendgroup=f"{y0}",
             )
         )
         fig.add_trace(
@@ -236,7 +238,8 @@ def main(argv: list[str] | None = None) -> Path:
                 x=xs[0],
                 y=-xs[1],
                 mode="lines",
-                line={"color": COLORS["C0"]},
+                line={"color": color},
+                legendgroup=f"{y0}",
                 showlegend=False,
             )
         )

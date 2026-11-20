@@ -56,6 +56,7 @@ from pathlib import Path
 
 import numpy as np
 import plasmacoll
+import plotly.colors
 import plotly.graph_objects as go
 from plasma_plots import save_figure
 from plasmacoll.constants import ATOMIC_MASS, BOLTZMANN, ELEMENTARY_CHARGE
@@ -87,6 +88,14 @@ PITCH = 5.0e-4
 HALF_WIDTH = 3.0e-3
 START = 1.0e-3  # the ions start here, in the uniform field
 PLANES_KT = (20.0, 40.0, 60.0, 80.0, 100.0)  # q V / k T from START to each plane
+
+
+def _sci(value: float) -> str:
+    """``value`` with three digits, as LaTeX with a power of ten if needed."""
+    mantissa, exponent = f"{value:.2e}".split("e")
+    if -2 <= int(exponent) <= 2:
+        return f"{value:.3g}"
+    return f"{mantissa} \\times 10^{{{int(exponent)}}}"
 
 
 def build(voltage: float, spacing: float):
@@ -147,7 +156,8 @@ def drift(
     """
     mcc = plasmacoll.MonteCarloCollisions(
         {"ion": ION_MASS},
-        [plasmacoll.NeutralBackground("N2", density, TEMPERATURE, GAS_MASS)],
+        # plasmacoll takes the gas temperature as k T in eV
+        [plasmacoll.NeutralBackground("N2", density, KT / ELEMENTARY_CHARGE, GAS_MASS)],
         {
             "ion": [
                 plasmacoll.CollisionProcess(
@@ -271,7 +281,7 @@ def main(argv: list[str] | None = None) -> Path:
             z=fields.phi.T,
             colorscale="Viridis",
             contours={"coloring": "heatmap"},
-            colorbar={"title": "phi (V)", "x": 1.02},
+            colorbar={"title": "$\\phi\\ (\\mathrm{V})$", "x": 1.02},
             opacity=0.7,
         )
     )
@@ -309,11 +319,22 @@ def main(argv: list[str] | None = None) -> Path:
 
     # 2: arrival-time distributions against the predicted Gaussians
     fig = go.Figure()
+    palette = plotly.colors.qualitative.Plotly
     for k, (d, kt) in enumerate(zip(distances, planes_kt, strict=True)):
+        color = palette[k % len(palette)]
         times = arrival[k][np.isfinite(arrival[k])] * 1e6
         counts, edges = np.histogram(times, bins=40, density=True)
         centres = 0.5 * (edges[1:] + edges[:-1])
-        fig.add_trace(go.Bar(x=centres, y=counts, opacity=0.5, name=f"qV/kT = {kt:g}"))
+        fig.add_trace(
+            go.Bar(
+                x=centres,
+                y=counts,
+                opacity=0.6,
+                marker={"color": color},
+                name=f"$qV/kT = {kt:g}$",
+                legendgroup=f"{kt:g}",
+            )
+        )
         t_pred = d / (mobility * field_measured)
         s_pred = np.sqrt(2 * diffusion * t_pred) / (mobility * field_measured)
         tt = np.linspace(edges[0], edges[-1], 200)
@@ -323,14 +344,18 @@ def main(argv: list[str] | None = None) -> Path:
                 y=np.exp(-0.5 * ((tt - t_pred * 1e6) / (s_pred * 1e6)) ** 2)
                 / (np.sqrt(2 * np.pi) * s_pred * 1e6),
                 mode="lines",
-                line={"color": "black"},
-                showlegend=k == 0,
-                name="K E drift, Einstein diffusion",
+                line={"color": color, "width": 2.5},
+                legendgroup=f"{kt:g}",
+                showlegend=False,
+                name=f"predicted, qV/kT = {kt:g}",
             )
         )
-    fig.update_layout(barmode="overlay", title="Arrival-time distributions")
-    fig.update_xaxes(title_text="arrival time (us)")
-    fig.update_yaxes(title_text="probability density (1/us)")
+    fig.update_layout(
+        barmode="overlay",
+        title="Arrival times (bars) and predicted Gaussians (lines)",
+    )
+    fig.update_xaxes(title_text="arrival time (µs)")
+    fig.update_yaxes(title_text="probability density (1/µs)")
     save_figure(fig, output / "arrival")
 
     # 3: mobility
@@ -341,7 +366,10 @@ def main(argv: list[str] | None = None) -> Path:
             y=mean_t * 1e6,
             mode="markers",
             marker={"color": COLORS["C0"], "size": 9},
-            name=f"simulated, K0 = {k_sim * 1e4 * density / n0:.3f} cm^2/V s",
+            name=(
+                f"$\\text{{simulated, }} K_0 = {k_sim * 1e4 * density / n0:.3f}"
+                "\\ \\mathrm{cm^2/V\\,s}$"
+            ),
         )
     )
     dd = np.linspace(0, distances[-1], 50)
@@ -351,11 +379,15 @@ def main(argv: list[str] | None = None) -> Path:
             y=dd / (mobility * field_measured) * 1e6,
             mode="lines",
             line={"color": "black", "dash": "dash"},
-            name=f"polarization limit, K0 = {mobility * 1e4 * density / n0:.3f} cm^2/V s",
+            name=(
+                "$\\text{polarization limit, }"
+                f" K_0 = {mobility * 1e4 * density / n0:.3f}"
+                "\\ \\mathrm{cm^2/V\\,s}$"
+            ),
         )
     )
     fig.update_xaxes(title_text="drift length (mm)")
-    fig.update_yaxes(title_text="mean arrival time (us)")
+    fig.update_yaxes(title_text="mean arrival time (µs)")
     fig.update_layout(title="Drift velocity: mean arrival time against drift length")
     save_figure(fig, output / "mobility")
 
@@ -367,7 +399,7 @@ def main(argv: list[str] | None = None) -> Path:
             y=var_t * 1e12,
             mode="markers",
             marker={"color": COLORS["C0"], "size": 9},
-            name=f"simulated, D = {d_sim:.3g} m^2/s",
+            name=f"$\\text{{simulated, }} D = {_sci(d_sim)}\\ \\mathrm{{m^2/s}}$",
         )
     )
     fig.add_trace(
@@ -376,11 +408,14 @@ def main(argv: list[str] | None = None) -> Path:
             y=2 * diffusion * dd / (mobility * field_measured) ** 3 * 1e12,
             mode="lines",
             line={"color": "black", "dash": "dash"},
-            name=f"Einstein, D = K k T / q = {diffusion:.3g} m^2/s",
+            name=(
+                f"$\\text{{Einstein, }} D = K k T / q = {_sci(diffusion)}"
+                "\\ \\mathrm{m^2/s}$"
+            ),
         )
     )
     fig.update_xaxes(title_text="drift length (mm)")
-    fig.update_yaxes(title_text="arrival-time variance (us^2)")
+    fig.update_yaxes(title_text="arrival-time variance (µs²)")
     fig.update_layout(title="Longitudinal diffusion of the ion packet")
     save_figure(fig, output / "diffusion")
 
@@ -394,7 +429,7 @@ def main(argv: list[str] | None = None) -> Path:
             y=resolving,
             mode="markers",
             marker={"color": COLORS["C0"], "size": 9},
-            name="simulated t / FWHM",
+            name="$\\text{simulated } t_d / \\Delta t_\\mathrm{FWHM}$",
         )
     )
     vv = np.linspace(0.5 * kts[0], kts[-1], 50) * KT / ELEMENTARY_CHARGE
@@ -404,7 +439,7 @@ def main(argv: list[str] | None = None) -> Path:
             y=np.sqrt(ELEMENTARY_CHARGE * vv / (16 * np.log(2) * KT)),
             mode="lines",
             line={"color": "black", "dash": "dash"},
-            name="diffusion limit sqrt(qV / 16 ln2 kT)",
+            name="$\\text{diffusion limit } \\sqrt{qV / (16 \\ln 2\\, kT)}$",
         )
     )
     fig.update_xaxes(title_text="drift voltage (V)")

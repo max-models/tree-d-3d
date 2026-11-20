@@ -34,8 +34,8 @@ reference mass ``m = 1`` (read as 100 u); other masses follow exactly from
 4. ``time_of_flight``: flight time against energy at the focusing field, flat to first
    order around ``U0``, against a linear instrument of the same flight time.
 5. ``mass_spectrum``: arrival-time spectra of three neighbouring masses with a 1 %
-   energy spread: resolved by the reflectron, merged in the linear instrument, with the
-   resolving powers ``m / dm = t / (2 dt)``.
+   energy spread, each normalised to its highest bin: resolved by the reflectron, merged
+   in the linear instrument, with the resolving powers ``m / dm = t / (2 dt)``.
 
 Usage::
 
@@ -219,17 +219,17 @@ def main(argv: list[str] | None = None) -> Path:
             y=slopes,
             mode="lines+markers",
             line={"color": COLORS["C0"]},
-            name="dt/dU at U0 (traced)",
+            name=r"$dt/dU\ \text{at}\ U_0\ \text{(traced)}$",
         )
     )
     fig.add_hline(y=0.0, line={"color": "gray", "dash": "dot"})
     fig.add_vline(
         x=1.0,
-        line={"color": "black", "dash": "dash"},
-        annotation_text="q E L = 4 U0",
+        line={"color": COLORS["C1"], "dash": "dash"},
+        annotation_text="qEL = 4U₀",
     )
-    fig.update_xaxes(title_text="reflectron field / (4 U0 / q L)")
-    fig.update_yaxes(title_text="dt / dU at U0")
+    fig.update_xaxes(title_text=r"$E\,/\,(4U_0/qL)$")
+    fig.update_yaxes(title_text=r"$dt/dU\ \text{at}\ U_0$")
     fig.update_layout(title="First-order energy focusing of the reflectron")
     save_figure(fig, output / "energy_focusing")
 
@@ -246,7 +246,7 @@ def main(argv: list[str] | None = None) -> Path:
             z=fields.phi.T,
             colorscale="Viridis",
             contours={"coloring": "heatmap"},
-            colorbar={"title": "phi"},
+            colorbar={"title": {"text": r"$\phi$"}},
             opacity=0.6,
         )
     )
@@ -268,14 +268,15 @@ def main(argv: list[str] | None = None) -> Path:
             )
     _, paths = flight_times(fields, probe[[0, 2, 4]], dt)
     path = np.array(paths)
-    for j, color in zip(range(3), ("C0", "C1", "C3"), strict=True):
+    # the three paths almost coincide: drawn from thick to thin, each stays visible
+    for j, color, width in zip(range(3), ("C0", "C1", "C3"), (7, 4, 1.5), strict=True):
         fig.add_trace(
             go.Scatter(
                 x=path[:, 0, j],
                 y=path[:, 1, j],
                 mode="lines",
-                line={"color": COLORS[color]},
-                name=f"U = {probe[[0, 2, 4]][j]:.3f}",
+                line={"color": COLORS[color], "width": width},
+                name=f"$U = {probe[[0, 2, 4]][j]:.3f}$",
             )
         )
     fig.add_trace(
@@ -292,7 +293,7 @@ def main(argv: list[str] | None = None) -> Path:
         title_text="y", range=[-TUBE_HALF_HEIGHT - 0.6, TUBE_HALF_HEIGHT + 0.6]
     )
     fig.update_layout(
-        title="Gridless reflectron: flight tube, ring stack and ion paths",
+        title="Gridless reflectron and ion paths",
         legend={"orientation": "h", "y": -0.15},
     )
     save_figure(fig, output / "geometry")
@@ -317,7 +318,7 @@ def main(argv: list[str] | None = None) -> Path:
             x=x[inside],
             y=ideal[inside],
             mode="lines",
-            line={"color": "black", "dash": "dash"},
+            line={"color": COLORS["C1"], "dash": "dash"},
             name="uniform field from the entrance ring",
         )
     )
@@ -347,10 +348,10 @@ def main(argv: list[str] | None = None) -> Path:
             y=linear / t0 - 1,
             mode="lines",
             line={"color": COLORS["C3"], "dash": "dash"},
-            name="linear instrument, t ~ U^-1/2",
+            name=r"$\text{linear instrument},\ t \propto U^{-1/2}$",
         )
     )
-    fig.update_xaxes(title_text="ion energy / U0")
+    fig.update_xaxes(title_text="$U/U_0$")
     fig.update_yaxes(title_text="relative flight-time change")
     fig.update_layout(title="Flight time against energy at the focusing field")
     save_figure(fig, output / "time_of_flight")
@@ -366,26 +367,28 @@ def main(argv: list[str] | None = None) -> Path:
     masses = (100.0, 101.0, 102.0)
     fig = go.Figure()
     print("mass resolving power m / dm = t / (2 FWHM):")
-    for instrument, base, dash in (
-        ("reflectron", t_ref, "solid"),
-        ("linear", t_lin, "dash"),
+    for instrument, base, dash, color in (
+        ("reflectron", t_ref, "solid", COLORS["C0"]),
+        ("linear", t_lin, "dash", COLORS["C1"]),
     ):
         all_times = np.concatenate([base * np.sqrt(m / 100.0) for m in masses])
         fwhm = 2.3548 * np.std(base)
         resolving = np.mean(base) / (2 * fwhm)
         print(f"  {instrument}: {resolving:.0f}")
         counts, edges = np.histogram(all_times, bins=300)
+        # each spectrum relative to its own highest bin: the linear instrument's merged
+        # peak is some 30 times lower than the reflectron's and would look flat
         fig.add_trace(
             go.Scatter(
                 x=0.5 * (edges[1:] + edges[:-1]),
-                y=counts,
+                y=counts / max(counts.max(), 1),
                 mode="lines",
-                line={"dash": dash},
-                name=f"{instrument}, m/dm = {resolving:.0f}",
+                line={"dash": dash, "color": color},
+                name=rf"$\text{{{instrument}}},\ m/\Delta m = {resolving:.0f}$",
             )
         )
-    fig.update_xaxes(title_text="arrival time (code units, m = 100 u at t ~ sqrt(m))")
-    fig.update_yaxes(title_text="ions per bin")
+    fig.update_xaxes(title_text="arrival time (code units)")
+    fig.update_yaxes(title_text="ions per bin / highest bin")
     fig.update_layout(title="Masses 100, 101 and 102 u with a 1 % energy spread")
     save_figure(fig, output / "mass_spectrum")
 

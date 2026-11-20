@@ -120,7 +120,8 @@ def main(argv: list[str] | None = None) -> Path:
     a, d, q0 = 1.5, 5.0, 1.0
     f_exact = three_image_force(a, d, q0)
     n_detail = panels_scan[len(panels_scan) // 2]
-    elec = BoundaryIntegralElectrodes([circle(a, n_detail, 0.0)], k_e=K_E)
+    detail_circle = circle(a, n_detail, 0.0)
+    elec = BoundaryIntegralElectrodes([detail_circle], k_e=K_E)
     elec.solve(np.array([[d], [0.0]]), [q0])
     theta = np.linspace(0, 2 * np.pi, 2000, endpoint=False)
     boundary = np.stack((a * np.cos(theta), a * np.sin(theta)))
@@ -131,20 +132,50 @@ def main(argv: list[str] | None = None) -> Path:
         f"{abs(2 * K_E * q0 * np.log(d)):.3f})"
     )
 
+    # the potential oscillates within each panel: draw its range over each panel
+    # instead of a line that zigzags between the panels
+    vertex_angle = np.sort(
+        np.mod(
+            np.arctan2(detail_circle.vertices[1], detail_circle.vertices[0]), 2 * np.pi
+        )
+    )
+    panel = np.searchsorted(vertex_angle, theta) % len(vertex_angle)
+    panel_ids = np.unique(panel)
+    centre = np.array(
+        [np.angle(np.exp(1j * theta[panel == i]).mean()) for i in panel_ids]
+    )
+    lo = np.array([phi_boundary[panel == i].min() for i in panel_ids])
+    hi = np.array([phi_boundary[panel == i].max() for i in panel_ids])
+    order = np.argsort(np.mod(centre, 2 * np.pi))
+    centre, lo, hi = np.mod(centre, 2 * np.pi)[order], lo[order], hi[order]
+
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(
-            x=theta,
-            y=phi_boundary,
+            x=centre,
+            y=lo,
             mode="lines",
-            line={"color": COLORS["C0"]},
-            name=f"BEM, {n_detail} panels",
+            line={"color": COLORS["C0"], "width": 1},
+            showlegend=False,
+            hoverinfo="skip",
         )
     )
-    fig.update_xaxes(title_text="angle around the circle")
-    fig.update_yaxes(title_text="phi (target: 0)")
+    fig.add_trace(
+        go.Scatter(
+            x=centre,
+            y=hi,
+            mode="lines",
+            line={"color": COLORS["C0"], "width": 1},
+            fill="tonexty",
+            fillcolor="rgba(31, 119, 180, 0.6)",
+            name=f"range over each panel, {n_detail} panels",
+        )
+    )
+    fig.update_xaxes(title_text="angle around the circle (rad)")
+    fig.update_yaxes(title_text="$\\phi$")
     fig.update_layout(
-        title="Boundary potential of a grounded circle with an external charge"
+        title="Boundary potential of a grounded circle (target 0)",
+        legend={"orientation": "h", "y": -0.2},
     )
     save_figure(fig, output / "grounded_circle")
 
@@ -174,11 +205,16 @@ def main(argv: list[str] | None = None) -> Path:
             y=ref,
             mode="lines",
             line={"color": "black", "dash": "dash"},
-            name="1 / n^2",
+            name="$1/n^2$",
         )
     )
-    fig.update_xaxes(type="log", title_text="panels")
-    fig.update_yaxes(type="log", title_text="relative error of the force on the charge")
+    fig.update_xaxes(type="log", tickvals=list(panels_scan), title_text="panels")
+    fig.update_yaxes(
+        type="log",
+        dtick=1,
+        exponentformat="power",
+        title_text="relative error of the force",
+    )
     fig.update_layout(title="Image force on the external charge: convergence")
     save_figure(fig, output / "image_force")
 
@@ -210,11 +246,11 @@ def main(argv: list[str] | None = None) -> Path:
             y=exact_profile,
             mode="lines",
             line={"color": "black", "dash": "dash"},
-            name="exact V1 + (V2-V1) ln(r/a) / ln(b/a)",
+            name="$\\text{exact: } V_1 + (V_2 - V_1)\\,\\ln(r/a)/\\ln(b/a)$",
         )
     )
-    fig.update_xaxes(title_text="r")
-    fig.update_yaxes(title_text="phi")
+    fig.update_xaxes(title_text="$r$")
+    fig.update_yaxes(title_text="$\\phi$")
     fig.update_layout(title="Potential across the gap of a cylindrical capacitor")
     save_figure(fig, output / "capacitor_profile")
 
@@ -246,14 +282,19 @@ def main(argv: list[str] | None = None) -> Path:
             y=ref,
             mode="lines",
             line={"color": "black", "dash": "dash"},
-            name="1 / n^3",
+            name="$1/n^3$",
         )
     )
-    fig.update_xaxes(type="log", title_text="panels per conductor")
-    fig.update_yaxes(type="log", title_text="relative error of the induced charge")
-    fig.update_layout(
-        title="Induced charge on the capacitor's inner conductor: convergence"
+    fig.update_xaxes(
+        type="log", tickvals=list(panels_scan), title_text="panels per conductor"
     )
+    fig.update_yaxes(
+        type="log",
+        dtick=1,
+        exponentformat="power",
+        title_text="relative error of the induced charge",
+    )
+    fig.update_layout(title="Induced charge on the inner conductor: convergence")
     save_figure(fig, output / "capacitor_charge")
 
     # 5: a non-convex conductor, visual + boundary-residual capstone
@@ -282,14 +323,17 @@ def main(argv: list[str] | None = None) -> Path:
         f"{np.abs(residual).max():.3e}"
     )
 
-    lo, hi = vertices.min(axis=1) - 1.5, vertices.max(axis=1) + 1.5
+    # the plotted window holds the conductor and the source charge
+    lo = vertices.min(axis=1) - 1.5
+    hi = np.maximum(vertices.max(axis=1) + 1.5, q_pos[:, 0] + 1.0)
     xs = np.linspace(lo[0], hi[0], grid)
     ys = np.linspace(lo[1], hi[1], grid)
     xx, yy = np.meshgrid(xs, ys)
     grid_pts = np.stack((xx.ravel(), yy.ravel()))
     phi_grid = l_elec.potential(grid_pts).reshape(grid, grid)
     inside = np.asarray(l_shape.contains_points(grid_pts)).reshape(grid, grid)
-    phi_grid = np.where(inside, np.nan, phi_grid)
+    near_charge = np.hypot(xx - q_pos[0, 0], yy - q_pos[1, 0]) < 0.15
+    phi_grid = np.where(inside | near_charge, np.nan, phi_grid)
 
     fig = make_subplots()
     fig.add_trace(
@@ -300,7 +344,7 @@ def main(argv: list[str] | None = None) -> Path:
             colorscale="RdBu",
             reversescale=True,
             contours={"coloring": "heatmap"},
-            colorbar={"title": "phi"},
+            colorbar={"title": {"text": "$\\phi$"}},
         )
     )
     fig.add_trace(
@@ -321,9 +365,14 @@ def main(argv: list[str] | None = None) -> Path:
             name="source charge",
         )
     )
-    fig.update_xaxes(title_text="x")
-    fig.update_yaxes(title_text="y", scaleanchor="x")
-    fig.update_layout(title="Potential around a grounded L-shaped conductor")
+    fig.update_xaxes(title_text="$x$", range=[xs[0], xs[-1]], constrain="domain")
+    fig.update_yaxes(
+        title_text="$y$", range=[ys[0], ys[-1]], scaleanchor="x", constrain="domain"
+    )
+    fig.update_layout(
+        title="Potential around a grounded L-shaped conductor",
+        legend={"orientation": "h", "y": -0.15},
+    )
     save_figure(fig, output / "corner_potential")
 
     print(f"figures in {output}")

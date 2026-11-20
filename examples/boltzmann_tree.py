@@ -22,8 +22,9 @@ measures what the solve costs.
 3. ``convergence``: error of the tree solution against the radial ODE against the leaf
    size, with one and four quadrature points per leaf: roughly first order, with the
    leaf-charge representation (point charges plus a mean self-potential) as the limit.
-4. ``leaves``: the adaptive leaves coloured by their electron charge for the strong test
-   charge; refinement follows the potential gradient, not the ions.
+4. ``leaves``: the adaptive leaves coloured by their electron density ``n_e / n0`` (log
+   scale) for the strong test charge; refinement follows the potential gradient, not the
+   ions.
 
 Usage::
 
@@ -66,6 +67,32 @@ def mean_self_log(samples: int = 400) -> float:
 
 
 SELF_LOG = mean_self_log()
+
+
+def log_ticks(values) -> dict:
+    """Ticks of a log axis over ``values``: decades from two decades on, else 1-2-5.
+
+    A narrower span gets 1-2-5 ticks (every mantissa 1..9 if that gives fewer than
+    three), and its range starts at the tick below the smallest value, so the lowest
+    data has a labelled tick under it.
+    """
+    values = np.asarray(values, dtype=float)
+    values = values[np.isfinite(values) & (values > 0)]
+    lo, hi = values.min(), values.max()
+    if np.log10(hi / lo) >= 2:
+        return {"dtick": 1, "exponentformat": "power"}
+    decades = range(int(np.floor(np.log10(lo))) - 1, int(np.ceil(np.log10(hi))) + 1)
+    for mantissas in ((1, 2, 5), range(1, 10)):
+        ticks = [m * 10.0**e for e in decades for m in mantissas]
+        below = max(t for t in ticks if t <= lo)
+        inside = [below] + [t for t in ticks if lo < t <= hi * 1.05]
+        if len(inside) >= 3:
+            break
+    return {
+        "tickvals": inside,
+        "ticktext": [f"{t:g}" for t in inside],
+        "range": [float(np.log10(below)) - 0.02, float(np.log10(hi)) + 0.05],
+    }
 
 
 class LeafTree:
@@ -260,7 +287,7 @@ def main(argv: list[str] | None = None) -> Path:
                 y=phi[order],
                 mode="markers",
                 marker={"color": color, "size": 3},
-                name=f"tree leaves, Q = {test_charge}",
+                name=f"tree, Q = {test_charge}",
             )
         )
         fig.add_trace(
@@ -269,7 +296,7 @@ def main(argv: list[str] | None = None) -> Path:
                 y=2 * test_charge * k0(r_plot / lam),
                 mode="lines",
                 line={"color": color, "dash": "dot"},
-                name=f"linear: 2 Q K0(r/λ_D), Q = {test_charge}",
+                name=f"linear, Q = {test_charge}",
             )
         )
         sol = radial_ode(n0, T, test_charge, radius)
@@ -279,13 +306,13 @@ def main(argv: list[str] | None = None) -> Path:
                 y=sol.sol(r_plot)[0],
                 mode="lines",
                 line={"color": color},
-                name=f"radial nonlinear ODE, Q = {test_charge}",
+                name=f"radial ODE, Q = {test_charge}",
             )
         )
-    fig.update_xaxes(type="log", title_text="r / λ_D")
-    fig.update_yaxes(title_text="φ / T")
+    fig.update_xaxes(type="log", title_text="$r/\\lambda_D$", **log_ticks(r_plot / lam))
+    fig.update_yaxes(title_text="$\\phi/T$")
     fig.update_layout(
-        title="Debye shielding of a test line charge: Boltzmann electrons on the tree leaves",
+        title="Debye shielding of a test line charge",
         legend={"font": {"size": 10}},
     )
     save_figure(fig, output / "profiles")
@@ -294,6 +321,7 @@ def main(argv: list[str] | None = None) -> Path:
     levels = [1, 2] if args.smoke else [1, 2, 3, 4] if args.quick else [1, 2, 3, 4, 5]
     strong = 1.5
     fig = go.Figure()
+    all_sizes, all_counts = [], []
     for method, color in (("picard", COLORS["C1"]), ("newton", COLORS["C2"])):
         xs, ys, texts = [], [], []
         for level in levels:
@@ -313,14 +341,21 @@ def main(argv: list[str] | None = None) -> Path:
                 text=texts,
                 textposition="top center",
                 line={"color": color},
-                name="damped Picard (0.5), with continuation in Q"
-                if method == "picard"
-                else "Newton-Krylov (residual evaluations), with continuation in Q",
+                name="damped Picard (0.5)" if method == "picard" else "Newton-Krylov",
             )
         )
-    fig.update_xaxes(type="log", title_text="leaf size / λ_D")
+        all_sizes += xs
+        all_counts += ys
+    fig.update_xaxes(
+        type="log",
+        title_text="$\\text{leaf size}/\\lambda_D$",
+        tickvals=sorted(set(all_sizes)),
+        ticktext=[f"{x:g}" for x in sorted(set(all_sizes))],
+    )
     fig.update_yaxes(
-        type="log", title_text="potential evaluations to converge (Q = 1.5)"
+        type="log",
+        title_text="potential evaluations (Q = 1.5)",
+        **log_ticks(all_counts),
     )
     fig.update_layout(
         title="Cost of the nonlinear solve against the leaf size",
@@ -333,6 +368,7 @@ def main(argv: list[str] | None = None) -> Path:
     test_charge = 1.0
     sol = radial_ode(n0, T, test_charge, radius)
     sizes = [2, 3] if args.smoke else [2, 3, 4] if args.quick else [2, 3, 4, 5]
+    all_sizes, all_errors = [], []
     for points, color in ((1, COLORS["C0"]), (4, COLORS["C2"])):
         xs, ys = [], []
         for level in sizes:
@@ -353,12 +389,21 @@ def main(argv: list[str] | None = None) -> Path:
                 y=ys,
                 mode="lines+markers",
                 line={"color": color},
-                name=f"{points} quadrature point(s) per leaf",
+                name=f"{points} point{'s' if points > 1 else ''} per leaf",
             )
         )
-    fig.update_xaxes(type="log", title_text="smallest leaf size / λ_D")
+        all_sizes += xs
+        all_errors += ys
+    fig.update_xaxes(
+        type="log",
+        title_text="$\\text{smallest leaf size}/\\lambda_D$",
+        tickvals=sorted(set(all_sizes)),
+        ticktext=[f"{x:.3g}" for x in sorted(set(all_sizes))],
+    )
     fig.update_yaxes(
-        type="log", title_text="max relative error of φ for 0.5 < r/λ_D < 5"
+        type="log",
+        title_text="$\\text{max rel. error of }\\phi,\\ 0.5 < r/\\lambda_D < 5$",
+        **log_ticks(all_errors),
     )
     fig.update_layout(title="Convergence against the radial nonlinear ODE (Q = 1)")
     save_figure(fig, output / "convergence")
@@ -368,36 +413,76 @@ def main(argv: list[str] | None = None) -> Path:
     q_e = -n0 * tree.weights * np.exp(np.clip(phi / T, -50, 50))
     leaf_q = np.bincount(tree.leaf_of_point, q_e, minlength=len(tree.centre))
     leaf_area = tree.size**2
-    fig = go.Figure()
+    # log10(n_e / n0) in each leaf: the leaves next to the charge are tens of times
+    # denser than the rest, which a linear colour scale would wash out
+    log_density = np.log10(leaf_q / leaf_area / (-n0))
+    # the leaves' density as an image (so it gets a colour scale), the leaf
+    # outlines on top, both cut to the plotted window
+    half = 3 * lam
+    pixels = np.linspace(-half, half, 301)
+    image = np.full((len(pixels), len(pixels)), np.nan)
     shapes = []
-    density = leaf_q / leaf_area / (-n0)
-    for c, s, dens in zip(tree.centre, tree.size, density):
-        shade = min(1.0, max(0.0, (dens - 1.0) / 6.0))
+    for c, size, value in zip(tree.centre, tree.size, log_density):
+        x0, x1 = c.real - size / 2, c.real + size / 2
+        y0, y1 = c.imag - size / 2, c.imag + size / 2
+        if x1 < -half or x0 > half or y1 < -half or y0 > half:
+            continue
+        in_x = (pixels >= x0) & (pixels <= x1)
+        in_y = (pixels >= y0) & (pixels <= y1)
+        image[np.ix_(in_y, in_x)] = value
         shapes.append(
             {
                 "type": "rect",
-                "x0": c.real - s / 2,
-                "y0": c.imag - s / 2,
-                "x1": c.real + s / 2,
-                "y1": c.imag + s / 2,
-                "line": {"color": "rgb(120,120,120)", "width": 0.4},
-                "fillcolor": f"rgba(214,39,40,{shade:.2f})",
+                "x0": max(x0, -half),
+                "y0": max(y0, -half),
+                "x1": min(x1, half),
+                "y1": min(y1, half),
+                "line": {"color": "rgb(140,140,140)", "width": 0.5},
+                "layer": "above",
             }
         )
-    fig.update_layout(
-        shapes=shapes,
-        title="Adaptive leaves and their electron density n_e / n0 - 1 (red) around the strong test charge",
-        xaxis={"range": [-3 * lam, 3 * lam], "scaleanchor": "y", "showgrid": False},
-        yaxis={"range": [-3 * lam, 3 * lam], "showgrid": False},
+    fig = go.Figure()
+    fig.add_trace(
+        go.Heatmap(
+            x=pixels / lam,
+            y=pixels / lam,
+            z=image,
+            colorscale="Reds",
+            zmin=0.0,
+            colorbar={"title": {"text": "$\\log_{10}(n_e/n_0)$"}},
+            hovertemplate="x %{x:.2f}, y %{y:.2f}: %{z:.2f}<extra></extra>",
+        )
     )
     fig.add_trace(
         go.Scatter(
             x=[0],
             y=[0],
             mode="markers",
-            marker={"color": "black", "size": 8},
+            marker={
+                "color": COLORS["C0"],
+                "size": 9,
+                "line": {"color": "white", "width": 1},
+            },
             name="test charge",
         )
+    )
+    fig.update_layout(
+        shapes=shapes,
+        title="Leaves and electron density around the test charge (Q = 2)",
+        legend={"orientation": "h", "y": -0.15},
+    )
+    fig.update_xaxes(
+        title_text="$x/\\lambda_D$",
+        range=[-half / lam, half / lam],
+        scaleanchor="y",
+        constrain="domain",
+        showgrid=False,
+    )
+    fig.update_yaxes(
+        title_text="$y/\\lambda_D$",
+        range=[-half / lam, half / lam],
+        constrain="domain",
+        showgrid=False,
     )
     save_figure(fig, output / "leaves")
     print(f"figures in {output}")

@@ -1,8 +1,11 @@
 """Run the scripts in ``examples/`` and convert their figures into Starlight pages.
 
 Each figure is a Plotly figure saved with ``plasma_plots.save_figure(fig, output / name)``,
-which writes ``<name>.plotly.json`` (embedded as an interactive chart), ``<name>.png`` (its
-static fallback) and ``<name>.html`` (a standalone copy, not used by the docs).
+which writes ``<name>.plotly.json``, ``<name>.png`` and ``<name>.html``. The page embeds the
+figure as a web figure (``plasma_plots.plotly_backend.web_figure``: theme-neutral colours, a
+text alternative, single-precision arrays) on the docs theme's ``PlotlyFigure``, which draws it
+in the site's light or dark colours and, on a phone, puts the legend in a list below the plot.
+Light and dark posters (``save_posters``, needs kaleido) show until plotly.js has loaded.
 
 ``run``
     Runs each example with ``--quick --output docs/.cache/examples/<slug>``. A script is rerun
@@ -12,8 +15,9 @@ static fallback) and ``<name>.html`` (a standalone copy, not used by the docs).
     spread them over several machines (the weights are in ``example_weights.json``);
     ``--dry-run`` prints the plan.
 ``convert``
-    Writes ``docs/src/content/docs/example-scripts/<slug>.mdx`` from the figures of a run, copying their
-    ``.plotly.json`` into ``docs/public/example-scripts/<slug>/``. Captions and the intro text come from
+    Writes ``docs/src/content/docs/example-scripts/<slug>.mdx`` from the figures of a run, with
+    their web figures and posters in ``docs/public/example-scripts/<slug>/`` (cached next to
+    the run's figures, redrawn only when a figure changed). Captions and the intro text come from
     the script's module docstring. A script that has not been run is skipped (``--strict`` fails
     on it).
 ``clean``
@@ -45,7 +49,10 @@ CACHE = DOCS / ".cache" / "examples"
 # the "Scripts" group of the Examples section, next to the notebook pages in examples/
 CONTENT = DOCS / "src" / "content" / "docs" / "example-scripts"
 PUBLIC = DOCS / "public" / "example-scripts"
-COMPONENTS = "../../../components"
+PLOTLY_FIGURE = (
+    "import PlotlyFigure from "
+    "'@max-models/starlight-theme/components/PlotlyFigure.astro';"
+)
 
 
 def slug_of(path: Path) -> str:
@@ -295,6 +302,41 @@ def has_frames(path: Path) -> bool:
         return False
 
 
+def web_assets(source: Path, alt: str) -> list[Path]:
+    """The web figure and posters of one ``.plotly.json``, cached in the run's folder.
+
+    ``<name>.web.plotly.json``, ``<name>.web.png`` and ``<name>.web.dark.png`` next to the
+    figure, redrawn only when the figure is newer. Without kaleido (or its Chrome) the
+    posters are left out with a warning, which ``--strict`` lets pass: the page then shows
+    "Loading" until plotly.js has drawn the figure.
+    """
+    import plotly.io as pio
+    from plasma_plots.plotly_backend import save_posters, web_figure
+
+    stem = source.with_name(source.name.removesuffix(".plotly.json") + ".web")
+    web = stem.with_name(stem.name + ".plotly.json")
+    posters = [stem.with_suffix(".web.png"), stem.with_suffix(".web.dark.png")]
+    fresh = lambda path: (  # noqa: E731
+        path.exists() and path.stat().st_mtime >= source.stat().st_mtime
+    )
+    if not fresh(web) or not all(fresh(poster) for poster in posters):
+        figure = pio.read_json(source)
+        # a figure saved by plasma-plots is a web figure already: keep its hints (the aspect
+        # ratio from its layout size, which the web figure no longer carries)
+        meta = figure.layout.meta if isinstance(figure.layout.meta, dict) else {}
+        aspect = (meta.get("web") or {}).get("aspect")
+        web.write_text(
+            json.dumps(
+                web_figure(figure, alt=alt, aspect=aspect), separators=(",", ":")
+            )
+        )
+        try:
+            save_posters(figure, stem)
+        except Exception as error:  # noqa: BLE001  (kaleido or its browser missing)
+            print(f"[examples] warning: {source.parent.name}: no posters ({error})")
+    return [web] + [poster for poster in posters if fresh(poster)]
+
+
 def convert_example(script: Path, order: int) -> list[str]:
     """Write the MDX page of one example; return problems found along the way."""
     slug = slug_of(script)
@@ -320,10 +362,20 @@ def convert_example(script: Path, order: int) -> list[str]:
     public_dir = PUBLIC / slug
     shutil.rmtree(public_dir, ignore_errors=True)
     public_dir.mkdir(parents=True)
-    for name, _ in present:
-        shutil.copy2(
-            out_dir / f"{name}.plotly.json", public_dir / f"{name}.plotly.json"
-        )
+    attributes: dict[str, str] = {}
+    for name, caption in present:
+        url = f"/example-scripts/{slug}"
+        alt = _yaml_string(caption or name)
+        tag = [f'src="{url}/{name}.plotly.json"', f"alt={{{alt}}}"]
+        for path in web_assets(out_dir / f"{name}.plotly.json", caption or name):
+            if path.name.endswith(".plotly.json"):
+                target = f"{name}.plotly.json"
+            else:
+                target = name + path.name.split(".web", 1)[1]
+                key = "posterDark" if target.endswith(".dark.png") else "poster"
+                tag.append(f'{key}="{url}/{target}"')
+            shutil.copy2(path, public_dir / target)
+        attributes[name] = " ".join(tag)
 
     github = (
         f"https://github.com/max-models/tree-d-3d/blob/devel/examples/{script.name}"
@@ -336,7 +388,7 @@ def convert_example(script: Path, order: int) -> list[str]:
         f"  order: {order}",
         "---",
         "",
-        f"import PlotlyChart from '{COMPONENTS}/PlotlyChart.astro';",
+        PLOTLY_FIGURE,
         "",
     ]
     body = []
@@ -352,12 +404,11 @@ def convert_example(script: Path, order: int) -> list[str]:
     )
 
     def chart(name: str, caption: str) -> str:
-        # A JSX expression (``{...}``), not a plain quoted attribute: a caption containing a
-        # literal ``"`` (as some do) is invalid MDX in a bare ``title="..."`` attribute, since
+        # The alt text is a JSX expression (``{...}``), not a plain quoted attribute: a caption
+        # containing a literal ``"`` (as some do) is invalid MDX in a bare ``alt="..."``, since
         # JSX has no backslash-escape for a quote inside one -- unlike the JSON string
         # ``_yaml_string`` returns, which doubles as a valid JS string literal inside ``{...}``.
-        title = _yaml_string(caption or name)
-        tag = f'<PlotlyChart src="/example-scripts/{slug}/{name}.plotly.json" title={{{title}}} />'
+        tag = f"<PlotlyFigure {attributes[name]} />"
         return f"{tag}\n\n*{caption}*" if caption else tag
 
     if animations:

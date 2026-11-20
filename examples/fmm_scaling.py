@@ -70,6 +70,20 @@ def _rect(
     return shape
 
 
+def _log_ticks(values) -> dict:
+    """Ticks for a log axis over ``values``: decades only, or 1-2-5 for a short span."""
+    lo, hi = float(np.min(values)), float(np.max(values))
+    if np.log10(hi / lo) >= 2:
+        return {"dtick": 1}
+    ticks = [
+        m * 10.0**e
+        for e in range(int(np.floor(np.log10(lo))), int(np.ceil(np.log10(hi))) + 1)
+        for m in (1, 2, 5)
+        if lo / 1.3 <= m * 10.0**e <= hi * 1.3
+    ]
+    return {"tickvals": ticks, "exponentformat": "power"}
+
+
 def cloud(n: int, seed: int, box: float = 0.9) -> tuple[np.ndarray, np.ndarray]:
     """Random positions in a square and random unit charges of both signs."""
     rng = np.random.default_rng(seed)
@@ -108,12 +122,15 @@ def plot_order_accuracy(output: Path, n: int = 2000) -> None:
                 y=errors,
                 mode="lines+markers",
                 line={"color": color},
-                name=f"θ = {theta}",
+                name=f"$\\theta = {theta}$",
             )
         )
     fig.update_xaxes(title_text="expansion order")
     fig.update_yaxes(
-        type="log", title_text="max field error relative to the direct sum"
+        type="log",
+        dtick=3,
+        exponentformat="power",
+        title_text="max relative field error",
     )
     fig.update_layout(
         title="Multipole expansions converge almost exponentially in the order",
@@ -149,15 +166,18 @@ def plot_theta_accuracy(output: Path, n: int = 2000) -> None:
                 y=errors,
                 mode="lines+markers",
                 line={"color": color},
-                name=f"order = {order}",
+                name=f"order {order}",
             )
         )
-    fig.update_xaxes(title_text="opening angle θ")
+    fig.update_xaxes(title_text="$\\text{opening angle } \\theta$")
     fig.update_yaxes(
-        type="log", title_text="max field error relative to the direct sum"
+        type="log",
+        dtick=3,
+        exponentformat="power",
+        title_text="max relative field error",
     )
     fig.update_layout(
-        title="A larger θ accepts more distant pairs as well separated, at some cost in accuracy",
+        title="A larger θ is faster but less accurate",
         legend={"font": {"size": 10}},
     )
     save_figure(fig, output / "theta_accuracy")
@@ -208,13 +228,17 @@ def plot_interaction_counts(output: Path, quick: bool) -> None:
             y=anchor_count * (n_ref / anchor_n),
             mode="lines",
             line={"color": "rgb(153,153,153)", "dash": "dash"},
-            name="∝ N",
+            name="$\\propto N$",
         )
     )
-    fig.update_xaxes(type="log", title_text="N")
-    fig.update_yaxes(type="log", title_text="number of node pairs")
+    fig.update_xaxes(type="log", title_text="$N$", **_log_ticks(ns))
+    fig.update_yaxes(
+        type="log",
+        title_text="number of node pairs",
+        **_log_ticks(m2l_counts + p2p_counts),
+    )
     fig.update_layout(
-        title="The dual-tree traversal's interaction list grows linearly with N",
+        title="The interaction list grows linearly with N",
         legend={"font": {"size": 10}},
     )
     save_figure(fig, output / "interaction_counts")
@@ -304,7 +328,7 @@ def plot_scaling(output: Path, quick: bool) -> None:
             y=anchor_t * (n_ref / anchor_n) ** 2,
             mode="lines",
             line={"color": "rgb(153,153,153)", "dash": "dash"},
-            name="∝ N²",
+            name="$\\propto N^2$",
         )
     )
     anchor_n2, anchor_t2 = tree_ns[0], tree_times[0]
@@ -314,7 +338,7 @@ def plot_scaling(output: Path, quick: bool) -> None:
             y=anchor_t2 * (n_ref * np.log(n_ref)) / (anchor_n2 * np.log(anchor_n2)),
             mode="lines",
             line={"color": "rgb(153,153,153)", "dash": "dot"},
-            name="∝ N log N",
+            name="$\\propto N \\log N$",
         )
     )
     anchor_n3, anchor_t3 = tree_ns[0], fmm_times[0]
@@ -324,13 +348,15 @@ def plot_scaling(output: Path, quick: bool) -> None:
             y=anchor_t3 * (n_ref / anchor_n3),
             mode="lines",
             line={"color": "rgb(153,153,153)", "dash": "longdash"},
-            name="∝ N",
+            name="$\\propto N$",
         )
     )
-    fig.update_xaxes(type="log", title_text="N")
-    fig.update_yaxes(type="log", title_text="wall-clock time [s]")
+    fig.update_xaxes(type="log", title_text="$N$", **_log_ticks(tree_ns))
+    fig.update_yaxes(
+        type="log", dtick=1, exponentformat="power", title_text="wall-clock time (s)"
+    )
     fig.update_layout(
-        title="At large N the O(N) fast multipole method overtakes the O(N log N) tree walk",
+        title="At large N the O(N) FMM overtakes the O(N log N) tree walk",
         legend={"font": {"size": 10}},
     )
     save_figure(fig, output / "scaling")
@@ -434,13 +460,18 @@ def plot_interaction_list(output: Path, n: int = 600) -> None:
                 name=name,
             )
         )
-    fig.update_xaxes(range=[-1.05, 1.05], scaleanchor="y", showgrid=False)
-    fig.update_yaxes(range=[-1.05, 1.05], showgrid=False)
+    fig.update_xaxes(
+        range=[-1.05, 1.05],
+        scaleanchor="y",
+        constrain="domain",
+        showgrid=False,
+        zeroline=False,
+    )
+    fig.update_yaxes(
+        range=[-1.05, 1.05], constrain="domain", showgrid=False, zeroline=False
+    )
     fig.update_layout(
-        title=(
-            "Who the target leaf (black) talks to: near leaves exactly (orange), farther "
-            "well-separated boxes with one translation each (blue), regardless of their size"
-        ),
+        title="The interaction list of one target leaf",
         legend={"font": {"size": 10}},
     )
     save_figure(fig, output / "interaction_list")

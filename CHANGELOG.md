@@ -84,6 +84,10 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `solver="gmres"` (and `"auto"` above `DIRECT_LIMIT` panels): GMRES with fast multipole products
   and a self-term preconditioner, so tens of thousands of panels solve without a dense matrix.
 - Notebooks "Periodic electrodes", "Fast panel solves", "Absorbing objects" and "Kernels".
+- The example figures are web figures on the theme's `PlotlyFigure` (site colours, light and dark
+  posters, the legend below the plot on a phone), and every example's figures are laid out for a
+  phone: stacked panels, short titles, LaTeX labels, decade ticks, animations that start on their
+  first frame. The examples extra installs `plasma-plots[plotly,web]>=0.3`.
 
 ### Changed
 
@@ -108,6 +112,8 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the code does.
 
 - For an odd `far_points` the middle Gauss node is exactly the panel midpoint.
+- The drift-tube example passes the gas temperature to plasmacoll as kT in eV (it passed 300 K
+  as 300 eV); mobility, diffusion and resolving power now match their theory within a few percent.
 - `conductors_from_shape` keeps an open curve (a simgeometry `Polyline`) an open conductor
   instead of closing it.
 - The einzel-lens example no longer claims round einzel lenses focus equally for both

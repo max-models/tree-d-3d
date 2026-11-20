@@ -22,12 +22,14 @@ parameters each).
 3. ``fit_validity``: error against the evaluation radius for a rational fit made on one
    circle; the series keeps improving with distance, the rational fit plateaus at its
    fit accuracy, so a fit must be made at the closest accepted separation.
-4. ``hierarchical``: error of a cell's representation against its level in a quadtree,
-   for the Taylor series (exact upward translation), a flat AAA fit from all the cell's
-   particles, and a hierarchical AAA fit that compresses the children's equivalent
-   charges; the hierarchy is what keeps the small-cluster gains at the top of the tree.
+4. ``hierarchical``: error of a cell's representation against its level in a quadtree
+   (labelled by the particles per cell), for the Taylor series (exact upward
+   translation), a flat AAA fit from all the cell's particles, and a hierarchical AAA
+   fit that compresses the children's equivalent charges; the hierarchy is what keeps
+   the small-cluster gains at the top of the tree.
 5. ``pair_counts``: the number of accepted (far-field) and near-field cell pairs of the
-   dual-tree traversal against theta, for a fixed cloud; what a larger theta would buy.
+   dual-tree traversal against theta, for a fixed cloud (leaf capacity 16); what a
+   larger theta would buy.
 
 Usage::
 
@@ -158,6 +160,29 @@ def cloud(n, seed, box=1.0):
     )
 
 
+def log_ticks(fig: go.Figure, axis: str = "y") -> None:
+    """Decade ticks on a log axis spanning two decades or more, else 1-2-5 ticks."""
+    values = np.concatenate(
+        [np.asarray(getattr(trace, axis), dtype=float) for trace in fig.data]
+    )
+    values = values[np.isfinite(values) & (values > 0)]
+    decades = np.log10(values.max() / values.min()) if values.size else 0.0
+    update = fig.update_yaxes if axis == "y" else fig.update_xaxes
+    if decades >= 2:
+        update(dtick=1, exponentformat="power")
+    elif values.size:
+        # explicit 1-2-5 ticks with their full values: Plotly's "D2" labels the minor
+        # ticks with their leading digit only ("10k, 5, 2")
+        low, high = np.floor(np.log10(values.min())), np.ceil(np.log10(values.max()))
+        ticks = [
+            m * 10.0**e
+            for e in np.arange(low, high + 1)
+            for m in (1, 2, 5)
+            if values.min() / 1.5 <= m * 10.0**e <= values.max() * 1.5
+        ]
+        update(tickvals=ticks, ticktext=[f"{t:,.10g}" for t in ticks])
+
+
 # -- 1: accuracy per parameter -------------------------------------------------------------
 
 
@@ -190,7 +215,7 @@ def plot_cell_accuracy(output: Path, quick: bool) -> None:
                 y=err_t,
                 mode="lines+markers",
                 line={"color": color},
-                name=f"Taylor series, ρ = {rho}",
+                name=rf"$\text{{Taylor}},\ \rho = {rho}$",
             )
         )
         fig.add_trace(
@@ -200,13 +225,14 @@ def plot_cell_accuracy(output: Path, quick: bool) -> None:
                 mode="lines+markers",
                 line={"color": color, "dash": "dash"},
                 marker={"symbol": "square"},
-                name=f"m = p/2 equivalent charges, ρ = {rho}",
+                name=rf"$\text{{charges}},\ \rho = {rho}$",
             )
         )
-    fig.update_xaxes(title_text="complex parameters (p series terms, or 2 per charge)")
-    fig.update_yaxes(type="log", title_text="max field error on the circle, relative")
+    fig.update_xaxes(title_text=r"$\text{complex parameters}\ (p = 2m)$")
+    fig.update_yaxes(type="log", title_text="relative max field error")
+    log_ticks(fig)
     fig.update_layout(
-        title="A 32-charge cell: rational far field against the multipole series at equal cost",
+        title="32-charge cell: equivalent charges against Taylor",
         legend={"font": {"size": 10}},
     )
     save_figure(fig, output / "cell_accuracy")
@@ -243,14 +269,11 @@ def plot_cluster_size(output: Path, quick: bool) -> None:
                 name=f"ρ = {rho}",
             )
         )
-    fig.add_hline(y=1.0, line={"color": "black", "width": 0.8, "dash": "dot"})
-    fig.update_xaxes(type="log", title_text="sources in the cell")
-    fig.update_yaxes(
-        type="log", title_text="gain: Taylor error / rational error (p = 24, m = 12)"
-    )
-    fig.update_layout(
-        title="The rational gain decays with the cell population (m free poles, n branch points)"
-    )
+    fig.add_hline(y=1.0, line={"color": "gray", "width": 1, "dash": "dot"})
+    fig.update_xaxes(type="log", title_text="sources in the cell", tickvals=sizes)
+    fig.update_yaxes(type="log", title_text="Taylor error / rational error")
+    log_ticks(fig)
+    fig.update_layout(title="Rational gain against cell size (p = 24, m = 12)")
     save_figure(fig, output / "cluster_size")
 
 
@@ -278,7 +301,7 @@ def plot_fit_validity(output: Path) -> None:
                 y=et,
                 mode="lines+markers",
                 line={"color": color},
-                name=f"Taylor, fit ρ = {rho}",
+                name=rf"$\text{{Taylor, fit}}\ \rho = {rho}$",
             )
         )
         fig.add_trace(
@@ -288,13 +311,14 @@ def plot_fit_validity(output: Path) -> None:
                 mode="lines+markers",
                 line={"color": color, "dash": "dash"},
                 marker={"symbol": "square"},
-                name=f"rational, fit ρ = {rho}",
+                name=rf"$\text{{rational, fit}}\ \rho = {rho}$",
             )
         )
     fig.update_xaxes(title_text="evaluation radius / fitting radius")
-    fig.update_yaxes(type="log", title_text="max field error, relative")
+    fig.update_yaxes(type="log", title_text="relative max field error")
+    log_ticks(fig)
     fig.update_layout(
-        title="A rational fit holds its accuracy outward but does not improve; the series does",
+        title="Error away from the fitting circle",
         legend={"font": {"size": 10}},
     )
     save_figure(fig, output / "fit_validity")
@@ -386,14 +410,15 @@ def plot_hierarchical(output: Path, quick: bool) -> None:
             )
         x = list(range(levels, -1, -1))
         pop = [n // 4**lv for lv in x]
-        labels = [f"{lv} ({pp} per cell)" for lv, pp in zip(x, pop)]
+        labels = [str(pp) for pp in pop]
         fig.add_trace(
             go.Scatter(
                 x=labels,
                 y=[max(err_t[lv], 1e-17) for lv in x],
                 mode="lines+markers",
                 line={"color": color},
-                name=f"Taylor p = {p}, θ = {theta}",
+                name=rf"$\text{{Taylor}},\ \theta = {theta}$",
+                showlegend=False,
             )
         )
         fig.add_trace(
@@ -403,7 +428,8 @@ def plot_hierarchical(output: Path, quick: bool) -> None:
                 mode="lines+markers",
                 line={"color": color, "dash": "dot"},
                 marker={"symbol": "diamond"},
-                name=f"flat AAA m = {m}, θ = {theta}",
+                name=rf"$\text{{flat AAA}},\ \theta = {theta}$",
+                showlegend=False,
             )
         )
         fig.add_trace(
@@ -413,16 +439,43 @@ def plot_hierarchical(output: Path, quick: bool) -> None:
                 mode="lines+markers",
                 line={"color": color, "dash": "dash"},
                 marker={"symbol": "square"},
-                name=f"hierarchical AAA m = {m}, θ = {theta}",
+                name=rf"$\text{{hierarchical AAA}},\ \theta = {theta}$",
+                showlegend=False,
             )
         )
-    fig.update_xaxes(title_text="tree level (leaves first; particles per cell)")
-    fig.update_yaxes(
-        type="log",
-        title_text="max over cells of the far-field error at the closest accepted separation",
+    # a short legend: the line style names the scheme, the colour names theta
+    for name, dash, symbol in (
+        ("Taylor", "solid", "circle"),
+        ("flat AAA", "dot", "diamond"),
+        ("hierarchical AAA", "dash", "square"),
+    ):
+        fig.add_trace(
+            go.Scatter(
+                x=[None],
+                y=[None],
+                mode="lines+markers",
+                line={"color": "black", "dash": dash},
+                marker={"symbol": symbol},
+                name=name,
+            )
+        )
+    for theta, color in zip(thetas, (COLORS["C0"], COLORS["C3"])):
+        fig.add_trace(
+            go.Scatter(
+                x=[None],
+                y=[None],
+                mode="lines",
+                line={"color": color},
+                name=rf"$\theta = {theta}$",
+            )
+        )
+    fig.update_xaxes(
+        title_text="particles per cell (leaves first)", type="category", tickangle=0
     )
+    fig.update_yaxes(type="log", title_text="max far-field error over cells")
+    log_ticks(fig)
     fig.update_layout(
-        title=f"Up the tree: Taylor (exact M2M) vs flat vs hierarchical rational fits, N = {n}",
+        title=f"Up the tree: N = {n}, p = {p}, m = {m}",
         legend={"font": {"size": 9}},
     )
     save_figure(fig, output / "hierarchical")
@@ -452,7 +505,7 @@ def plot_pair_counts(output: Path, quick: bool) -> None:
             y=m2l,
             mode="lines+markers",
             line={"color": COLORS["C0"]},
-            name="far-field (M2L) cell pairs",
+            name="far field (M2L)",
         )
     )
     fig.add_trace(
@@ -461,14 +514,13 @@ def plot_pair_counts(output: Path, quick: bool) -> None:
             y=p2p,
             mode="lines+markers",
             line={"color": COLORS["C1"]},
-            name="near-field (P2P) leaf pairs",
+            name="near field (P2P)",
         )
     )
-    fig.update_xaxes(title_text="θ")
+    fig.update_xaxes(title_text=r"$\theta$")
     fig.update_yaxes(type="log", title_text="pairs")
-    fig.update_layout(
-        title=f"What a larger θ buys: cell pairs of the dual-tree traversal, N = {n}, leaf capacity 16"
-    )
+    log_ticks(fig)
+    fig.update_layout(title=f"Cell and leaf pairs against θ (N = {n})")
     save_figure(fig, output / "pair_counts")
 
 

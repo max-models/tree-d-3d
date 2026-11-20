@@ -18,12 +18,13 @@ from an FMM.
 2. ``cost``: force (residual) evaluations per step of the two implicit schemes against
    ``dt * omega_pe``, with the number of explicit steps the same ``dt`` covers; the
    scheme pays only where the evaluations per step fall below that line. Steps on which
-   the unpreconditioned Newton-Krylov solver did not converge are marked.
+   the unpreconditioned Newton-Krylov solver did not converge are counted next to the
+   points (above the discrete-gradient curve, below the midpoint curve).
 3. ``kinetic``: kinetic energy against time for the explicit reference and the
    discrete-gradient scheme at the three steps; what a step that does not resolve the
    plasma oscillation does to the dynamics.
-4. ``convergence``: the residual history of one Newton-Krylov solve per step size; why
-   the large steps fail without a preconditioner.
+4. ``convergence``: the residual history of one Newton-Krylov solve per step size (the
+   smallest residual reached so far); why the large steps fail without a preconditioner.
 
 Usage::
 
@@ -217,31 +218,32 @@ def main(argv: list[str] | None = None) -> Path:
 
     # 1. energy
     fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=[r[0] for r in ref],
-            y=[r[1] / e0 - 1 for r in ref],
-            mode="lines",
-            line={"color": "black"},
-            name="explicit Verlet, dt·ω_pe = 0.1",
-        )
-    )
     for dg, color in ((False, COLORS["C1"]), (True, COLORS["C2"])):
         hist = results[0.5, dg][0]
+        label = r"\text{discrete gradient}" if dg else r"\text{implicit midpoint}"
         fig.add_trace(
             go.Scatter(
                 x=[h[0] for h in hist],
                 y=[h[1] / e0 - 1 for h in hist],
                 mode="lines+markers",
                 line={"color": color},
-                name=("discrete gradient" if dg else "implicit midpoint")
-                + ", dt·ω_pe = 0.5",
+                name=rf"${label},\ \omega_{{pe}}\,\Delta t = 0.5$",
             )
         )
+    # drawn last, dashed and thick: it lies on the discrete-gradient curve at zero
+    fig.add_trace(
+        go.Scatter(
+            x=[r[0] for r in ref],
+            y=[r[1] / e0 - 1 for r in ref],
+            mode="lines",
+            line={"color": COLORS["C0"], "dash": "dash", "width": 3},
+            name=r"$\text{explicit Verlet},\ \omega_{pe}\,\Delta t = 0.1$",
+        )
+    )
     fig.update_xaxes(title_text="time")
-    fig.update_yaxes(title_text="relative energy error", exponentformat="e")
+    fig.update_yaxes(title_text="relative energy error", exponentformat="power")
     fig.update_layout(
-        title=f"Energy: the discrete gradient conserves it to the solver tolerance (N = {n}, ω_pe = {wpe:.0f})",
+        title=f"Energy error (N = {n}, ωₚₑ = {wpe:.0f})",
         legend={"font": {"size": 10}},
     )
     save_figure(fig, output / "energy")
@@ -251,13 +253,22 @@ def main(argv: list[str] | None = None) -> Path:
     for dg, color in ((False, COLORS["C1"]), (True, COLORS["C2"])):
         means = [np.mean(results[f, dg][1]) for f in factors]
         fails = [results[f, dg][2] for f in factors]
+        # the midpoint curve lies below: its labels go under it (to the right, off the
+        # steep segment), the other's above (to the left); the last point's label leans
+        # left so that it is not clipped at the edge. The labels are in the text colour:
+        # the page's palette does not reach a trace's text.
+        if dg:
+            positions = ["top left"] * len(factors)
+        else:
+            positions = ["bottom right"] * (len(factors) - 1) + ["bottom left"]
         fig.add_trace(
             go.Scatter(
                 x=factors,
                 y=means,
                 mode="lines+markers+text",
                 text=[f"{k} failed" if k else "" for k in fails],
-                textposition="top center",
+                textposition=positions,
+                textfont={"color": "black"},
                 line={"color": color},
                 name="discrete gradient" if dg else "implicit midpoint",
             )
@@ -267,14 +278,26 @@ def main(argv: list[str] | None = None) -> Path:
             x=factors,
             y=[f / 0.1 for f in factors],
             mode="lines",
-            line={"color": "black", "dash": "dash"},
-            name="explicit steps covered (dt·ω_pe = 0.1 each)",
+            line={"color": COLORS["C0"], "dash": "dash"},
+            name=r"$\text{explicit steps covered}\ (\omega_{pe}\,\Delta t = 0.1)$",
         )
     )
-    fig.update_xaxes(type="log", title_text="dt · ω_pe")
-    fig.update_yaxes(type="log", title_text="force evaluations per step")
+    fig.update_xaxes(
+        type="log",
+        title_text=r"$\omega_{pe}\,\Delta t$",
+        tickvals=[0.5, 1, 2, 5, 10],
+        range=[np.log10(0.4), np.log10(13)],
+    )
+    # head room above the highest point for its "failed" label
+    top = max(np.mean(results[f, dg][1]) for f in factors for dg in (False, True))
+    fig.update_yaxes(
+        type="log",
+        dtick=1,
+        range=[np.log10(3), np.log10(4 * top)],
+        title_text="force evaluations per step",
+    )
     fig.update_layout(
-        title="Cost: Jacobian-free Newton-Krylov without preconditioning",
+        title="Cost of Newton-Krylov without preconditioning",
         legend={"font": {"size": 10}},
     )
     save_figure(fig, output / "cost")
@@ -286,7 +309,7 @@ def main(argv: list[str] | None = None) -> Path:
             x=[r[0] for r in ref],
             y=[r[2] for r in ref],
             mode="lines",
-            line={"color": "black"},
+            line={"color": COLORS["C4"]},
             name="explicit reference",
         )
     )
@@ -298,36 +321,40 @@ def main(argv: list[str] | None = None) -> Path:
                 y=[h[2] for h in hist],
                 mode="lines+markers",
                 line={"color": color},
-                name=f"discrete gradient, dt·ω_pe = {factor}",
+                name=rf"$\text{{discrete gradient}},\ \omega_{{pe}}\,\Delta t = {factor}$",
             )
         )
     fig.update_xaxes(title_text="time")
     fig.update_yaxes(title_text="kinetic energy")
     fig.update_layout(
-        title="Dynamics: a step that does not resolve ω_pe misses the oscillation",
+        title="Kinetic energy: steps that do not resolve ωₚₑ",
         legend={"font": {"size": 10}},
     )
     save_figure(fig, output / "kinetic")
 
-    # 4. convergence
+    # 4. convergence: the best residual reached so far (the GMRES matvecs evaluate the
+    # residual at perturbed points, whose raw values only add noise)
     fig = go.Figure()
     for factor, color in zip(factors, (COLORS["C0"], COLORS["C2"], COLORS["C3"])):
-        history = results[factor, True][3] or []
+        history = np.maximum(results[factor, True][3] or [], 1e-18)
         fig.add_trace(
             go.Scatter(
-                x=list(range(1, len(history) + 1)),
-                y=[max(h, 1e-18) for h in history],
+                x=np.arange(1, len(history) + 1),
+                y=np.minimum.accumulate(history) if len(history) else history,
                 mode="lines",
                 line={"color": color},
-                name=f"dt·ω_pe = {factor}",
+                name=rf"$\omega_{{pe}}\,\Delta t = {factor}$",
             )
         )
-    fig.update_xaxes(
-        title_text="residual evaluation (Newton iterations and GMRES matvecs)"
+    fig.update_xaxes(title_text="residual evaluations")
+    fig.update_yaxes(
+        type="log",
+        dtick=2,
+        exponentformat="power",
+        title_text="smallest max |residual| so far",
     )
-    fig.update_yaxes(type="log", title_text="max |residual| of the first step")
     fig.update_layout(
-        title="Convergence of one unpreconditioned Newton-Krylov solve (discrete gradient)",
+        title="One Newton-Krylov solve (discrete gradient)",
         legend={"font": {"size": 10}},
     )
     save_figure(fig, output / "convergence")
