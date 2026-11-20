@@ -69,6 +69,7 @@ from tree_d_3d import (
 )
 
 COLORS = {"C0": "#1f77b4", "C1": "#ff7f0e", "C2": "#2ca02c", "C3": "#d62728"}
+RAY_COLOR = "#ff1f5b"  # stands out on the whole viridis range
 K_E = 1.0 / (4.0 * np.pi)  # eps0 = 1
 GAP = 1.0
 VOLTAGE = 1.0
@@ -252,8 +253,8 @@ def main(argv: list[str] | None = None) -> Path:
             z=np.clip(phi.reshape(xx.shape), -0.2, 1.2),
             colorscale="Viridis",
             contours={"start": 0.0, "end": 1.0, "size": 0.1},
-            colorbar={"title": "phi", "x": 1.02},
-            opacity=0.7,
+            colorbar={"title": {"text": r"$\phi$"}, "x": 1.02},
+            opacity=0.85,
         )
     )
     for shape, potential in gun.electrodes:
@@ -275,13 +276,16 @@ def main(argv: list[str] | None = None) -> Path:
                 x=gun.x[ok, 0, k],
                 y=gun.x[ok, 1, k],
                 mode="lines",
-                line={"color": COLORS["C3"], "width": 1},
+                line={"color": RAY_COLOR, "width": 1.5},
                 showlegend=False,
             )
         )
-    fig.update_xaxes(title_text="x / d", range=[-0.1, 1.4], constrain="domain")
-    fig.update_yaxes(title_text="y / d", range=[-1.6, 1.6], scaleanchor="x")
-    fig.update_layout(title="Pierce sheet-beam gun at the Child-Langmuir current")
+    # equal scales on a box not much taller than wide, so that the plot fills the width
+    fig.update_xaxes(title_text="$x/d$", range=[-0.1, 1.4], constrain="domain")
+    fig.update_yaxes(
+        title_text="$y/d$", range=[-1.05, 1.05], scaleanchor="x", constrain="domain"
+    )
+    fig.update_layout(title="Pierce gun at the Child-Langmuir current")
     save_figure(fig, output / "geometry")
 
     # 2: axial potential
@@ -302,8 +306,8 @@ def main(argv: list[str] | None = None) -> Path:
             x=xa,
             y=VOLTAGE * (xa / GAP) ** (4 / 3),
             mode="lines",
-            line={"color": "black", "dash": "dash"},
-            name="Child-Langmuir V (x/d)^(4/3)",
+            line={"color": COLORS["C1"], "dash": "dash"},
+            name=r"$\text{Child-Langmuir}\ V\,(x/d)^{4/3}$",
         )
     )
     fig.add_trace(
@@ -312,10 +316,10 @@ def main(argv: list[str] | None = None) -> Path:
             y=VOLTAGE * xa / GAP,
             mode="lines",
             line={"color": "gray", "dash": "dot"},
-            name="vacuum V x/d",
+            name=r"$\text{vacuum}\ V\,x/d$",
         )
     )
-    fig.update_xaxes(title_text="x / d")
+    fig.update_xaxes(title_text="$x/d$")
     fig.update_yaxes(title_text="potential on the axis")
     fig.update_layout(title="Potential along the beam axis")
     save_figure(fig, output / "axial_potential")
@@ -347,15 +351,18 @@ def main(argv: list[str] | None = None) -> Path:
             y=slopes,
             mode="lines+markers",
             line={"color": COLORS["C0"]},
-            name="dphi/dx at the cathode (Gauss's law)",
+            name=r"$d\phi/dx\ \text{at the cathode (Gauss's law)}$",
         )
     )
     fig.add_hline(y=0.0, line={"color": "gray", "dash": "dot"})
     fig.add_vline(
-        x=1.0, line={"color": "black", "dash": "dash"}, annotation_text="J_CL"
+        x=1.0,
+        line={"color": COLORS["C1"], "dash": "dash"},
+        annotation_text="Child-Langmuir",
+        annotation_position="top right",
     )
-    fig.update_xaxes(title_text="J / J_CL")
-    fig.update_yaxes(title_text="cathode field dphi/dx (V/d)")
+    fig.update_xaxes(title_text=r"$J/J_\mathrm{CL}$")
+    fig.update_yaxes(title_text=r"$\text{cathode field}\ d\phi/dx\ (V/d)$")
     fig.update_layout(title="The space-charge limit: the cathode field vanishes")
     save_figure(fig, output / "cathode_field")
 
@@ -380,14 +387,17 @@ def main(argv: list[str] | None = None) -> Path:
         at_anode = np.interp(GAP, ex, ey) / g.y0[-1]
         print(f"{name}: outermost ray at the anode / at the cathode = {at_anode:.4f}")
     fig.add_vline(x=GAP, line={"color": "gray", "dash": "dot"}, annotation_text="anode")
-    fig.update_xaxes(title_text="x / d")
-    fig.update_yaxes(title_text="outermost ray y / w")
-    fig.update_layout(title="Beam edge with and without the Pierce electrodes at J_CL")
+    fig.update_xaxes(title_text="$x/d$")
+    fig.update_yaxes(title_text=r"$\text{outermost ray}\ y/w$")
+    fig.update_layout(title="Beam edge with and without Pierce electrodes")
     save_figure(fig, output / "beam_edge")
 
     # 5: convergence
     fig = go.Figure()
-    for g, name, color in ((gun, "Pierce, J_CL", "C0"), (flat, "flat, J_CL", "C3")):
+    for g, name, color in (
+        (gun, "Pierce electrodes", "C0"),
+        (flat, "flat diode", "C3"),
+    ):
         fig.add_trace(
             go.Scatter(
                 x=np.arange(2, len(g.history) + 2),
@@ -398,7 +408,15 @@ def main(argv: list[str] | None = None) -> Path:
             )
         )
     fig.update_xaxes(title_text="iteration")
-    fig.update_yaxes(type="log", title_text="max change of the rays (d)")
+    changes = np.concatenate([np.asarray(g.history, dtype=float) for g in (gun, flat)])
+    changes = changes[changes > 0]
+    decades = np.log10(changes.max() / changes.min()) if changes.size else 0.0
+    fig.update_yaxes(
+        type="log",
+        dtick=1 if decades >= 2 else "D2",
+        exponentformat="power",
+        title_text="max change of the rays (d)",
+    )
     fig.update_layout(title="Fixed-point convergence of the gun iteration")
     save_figure(fig, output / "convergence")
 

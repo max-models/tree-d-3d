@@ -47,7 +47,7 @@ agree the agreement is a check of the whole chain, and where they differ the dif
 is physics the theory leaves out.
 
 1. ``geometry``: the plates and the field magnitude in the gap, from the panel solve at
-   unit voltage, against the uniform ``1/d`` of ideal plates.
+   unit voltage, as its deviation in ppm from the uniform ``1/d`` of ideal plates.
 2. ``resonant_trajectory``: one electron at a first-order resonance crossing the gap in
    each half period, against the RF voltage.
 3. ``secondary_yield``: Vaughan's yield against impact energy at normal and oblique
@@ -86,7 +86,13 @@ from tree_d_3d import (
     conductors_from_shape,
 )
 
-COLORS = {"C0": "#1f77b4", "C1": "#ff7f0e", "C2": "#2ca02c", "C3": "#d62728"}
+COLORS = {
+    "C0": "#1f77b4",
+    "C1": "#ff7f0e",
+    "C2": "#2ca02c",
+    "C3": "#d62728",
+    "C4": "#9467bd",
+}
 
 E_CHARGE = 1.602176634e-19  # C
 M_E = 9.1093837015e-31  # kg
@@ -416,15 +422,17 @@ def theory_zone(fd, v0, *, emission_ev=2.0, bounces=40, samples=600):
 
 def plot_geometry(field: GapField, output: Path) -> None:
     """Figure 1: plates and the tabulated field magnitude against the ideal ``1/d``."""
-    magnitude = np.hypot(field.ex, field.ey) * GAP
+    # the deviation from the ideal 1/d, in parts per million: |E| d / V itself only
+    # differs from 1 in the sixth digit, which no colorbar label can show
+    deviation = (np.hypot(field.ex, field.ey) * GAP - 1.0) * 1e6
     fig = go.Figure()
     fig.add_trace(
         go.Heatmap(
             x=field.x * 1e3,
             y=field.y * 1e3,
-            z=magnitude,
+            z=deviation,
             colorscale="Viridis",
-            colorbar={"title": "|E| d / V"},
+            colorbar={"title": {"text": r"$|E|\,d/V - 1\ (\mathrm{ppm})$"}},
         )
     )
     for plate in field.plates:
@@ -443,9 +451,7 @@ def plot_geometry(field: GapField, output: Path) -> None:
         )
     fig.update_xaxes(title_text="x (mm)", range=[-3, 3])
     fig.update_yaxes(title_text="y (mm)", range=[-0.6, 1.6])
-    fig.update_layout(
-        title=f"Plates and the field at unit voltage ({field.num_panels} panels)"
-    )
+    fig.update_layout(title=f"Field at unit voltage ({field.num_panels} panels)")
     save_figure(fig, output / "geometry")
 
 
@@ -493,7 +499,7 @@ def plot_resonant_trajectory(
             y=np.array(ys) / GAP,
             mode="lines",
             line={"color": COLORS["C0"]},
-            name="electron, y / d",
+            name=r"$\text{electron},\ y/d$",
         )
     )
     fig.add_trace(
@@ -506,9 +512,9 @@ def plot_resonant_trajectory(
         )
     )
     fig.update_xaxes(title_text="time (RF cycles)")
-    fig.update_yaxes(title_text="y / d")
+    fig.update_yaxes(title_text="$y/d$")
     fig.update_layout(
-        title=f"First-order resonance: one gap crossing per half period (V0 = {v0:.0f} V)"
+        title=rf"$\text{{First-order resonance}},\ V_0 = {v0:.0f}\ \mathrm{{V}}$"
     )
     save_figure(fig, output / "resonant_trajectory")
 
@@ -520,7 +526,7 @@ def plot_secondary_yield(output: Path) -> float:
     fig = go.Figure()
     for theta, color, name in (
         (0.0, COLORS["C0"], "normal incidence"),
-        (np.pi / 3, COLORS["C2"], "60 degrees from the normal"),
+        (np.pi / 3, COLORS["C2"], "60° from the normal"),
     ):
         fig.add_trace(
             go.Scatter(
@@ -532,13 +538,20 @@ def plot_secondary_yield(output: Path) -> float:
             )
         )
     fig.add_hline(y=1.0, line={"color": "gray", "dash": "dot"})
-    fig.add_vline(
+    # below the delta = 1 line and right of E1: the one corner the curves leave empty
+    fig.add_vline(x=e1, line={"color": "gray", "dash": "dash"})
+    fig.add_annotation(
         x=e1,
-        line={"color": "gray", "dash": "dash"},
-        annotation_text=f"E1 = {e1:.0f} eV",
+        y=1.0,
+        text=f"E₁ = {e1:.0f} eV",
+        showarrow=False,
+        xanchor="left",
+        yanchor="top",
+        xshift=6,
+        yshift=-4,
     )
     fig.update_xaxes(title_text="impact energy (eV)")
-    fig.update_yaxes(title_text="secondary yield delta")
+    fig.update_yaxes(title_text=r"$\text{secondary yield}\ \delta$")
     fig.update_layout(title="Vaughan's secondary emission yield (illustrative copper)")
     save_figure(fig, output / "secondary_yield")
     return e1
@@ -613,13 +626,13 @@ def main(argv: list[str] | None = None) -> Path:
                 y=history[:, k],
                 mode="lines+markers",
                 line={"color": color},
-                name=f"V0 = {v:.0f} V",
+                name=rf"$V_0 = {v:.0f}\ \mathrm{{V}}$",
             )
         )
     fig.update_xaxes(title_text="RF cycles")
-    fig.update_yaxes(title_text="ln(N / N0)")
+    fig.update_yaxes(title_text=r"$\ln(N/N_0)$")
     fig.update_layout(
-        title=f"Electron number at f d = {fd_example} GHz mm: avalanche or decay"
+        title=rf"$\text{{Electron number at}}\ f\,d = {fd_example}\ \mathrm{{GHz\,mm}}$"
     )
     save_figure(fig, output / "electron_growth")
 
@@ -655,7 +668,7 @@ def main(argv: list[str] | None = None) -> Path:
             zmid=0.0,
             colorscale="RdBu",
             reversescale=True,
-            colorbar={"title": "ln N per cycle (clipped)"},
+            colorbar={"title": {"text": r"$\ln N\ \text{per cycle (clipped)}$"}},
         )
     )
     fig.add_trace(
@@ -664,9 +677,9 @@ def main(argv: list[str] | None = None) -> Path:
             y=v0_axis,
             z=predicted.astype(float),
             contours={"start": 0.5, "end": 0.5, "coloring": "none"},
-            line={"color": "black", "width": 2},
+            line={"color": COLORS["C4"], "width": 3},
             showscale=False,
-            name="theory: multipactor zone",
+            name="theory zone",
             showlegend=True,
         )
     )
@@ -680,13 +693,17 @@ def main(argv: list[str] | None = None) -> Path:
                 y=v_line[keep],
                 mode="lines",
                 line={"color": COLORS["C2"], "dash": dash},
-                name=f"resonance N = {order} (phase 0)",
+                name=f"resonance N = {order}",
             )
         )
-    fig.update_xaxes(type="log", title_text="f d (GHz mm)")
-    fig.update_yaxes(type="log", title_text="V0 (V)")
+    fig.update_xaxes(
+        type="log",
+        title_text=r"$f\,d\ (\mathrm{GHz\,mm})$",
+        tickvals=[0.3, 0.5, 1, 2, 3],
+    )
+    fig.update_yaxes(type="log", dtick=1, title_text=r"$V_0\ (\mathrm{V})$")
     fig.update_layout(
-        title="Multipactor susceptibility: simulation against theory",
+        title="Susceptibility: simulation against theory",
         legend={"orientation": "h", "y": -0.18},
     )
     save_figure(fig, output / "susceptibility_chart")

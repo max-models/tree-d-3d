@@ -8,14 +8,17 @@ Companion of ``conserving_tree_code.py``; each figure answers one question:
    (smooth cloud) softening; why the far field of the compact one is exact.
 2. ``weights``: the smoothstep weights of two neighbouring leaves across their
    edge and the derivative that enters the force.
-3. ``band_study``: field error, memberships per particle and energy error against
-   the band width.
+3. ``band_study``: field error (order 12, theta 0.5), memberships per particle and
+   the energy error of a co-moving Verlet run (order 2, theta 0.8; dashed: the direct
+   sum, i.e. the integrator alone) against the band width ``delta`` over the smallest
+   leaf half-width ``h_min``.
 4. ``cost_matched``: the cheapest (order, theta) reaching a given field error for
    the rectangle and the triangle truncation, with the M2L and near-field work counted.
-5. ``long_run``: energy error over a long Verlet run: no secular drift with smooth
-   membership on fixed co-moving boxes.
-6. ``error_map``: where the field error sits, for hard and smooth membership (it is
-   not concentrated at leaf edges, and blending does not change its distribution).
+5. ``long_run``: energy error over a long Verlet run (order 3, theta 0.8): no secular
+   drift with smooth membership on fixed co-moving boxes.
+6. ``error_map``: where the field error (order 8, theta 0.6) sits, for hard (top) and
+   smooth (bottom) membership (it is not concentrated at leaf edges, and blending does
+   not change its distribution).
 7. ``correction_term``: the size of the ``Phi grad w`` force term relative to the
    ordinary ``w G`` term, which is what restores the exact gradient.
 
@@ -90,6 +93,22 @@ def _box_shapes(tree, **kw) -> list[dict]:
     ]
 
 
+def _log_ticks(values) -> dict:
+    """Ticks for a log axis over ``values``: decades only, or 1-2-5 for a short span."""
+    values = np.asarray(values, dtype=float)
+    values = values[np.isfinite(values) & (values > 0)]
+    lo, hi = float(values.min()), float(values.max())
+    if np.log10(hi / lo) >= 2:
+        return {"dtick": 1, "exponentformat": "power"}
+    ticks = [
+        m * 10.0**e
+        for e in range(int(np.floor(np.log10(lo))), int(np.ceil(np.log10(hi))) + 1)
+        for m in (1, 2, 5)
+        if lo / 1.3 <= m * 10.0**e <= hi * 1.3
+    ]
+    return {"tickvals": ticks, "exponentformat": "power"}
+
+
 def cloud(n: int, seed: int, box: float = 0.9) -> tuple[np.ndarray, np.ndarray]:
     """Random positions in a square and random unit charges of both signs."""
     rng = np.random.default_rng(seed)
@@ -115,12 +134,11 @@ def plot_kernels(output: Path) -> None:
     plummer_g = r / (r**2 + eps**2)
 
     fig = make_subplots(
-        rows=1,
-        cols=2,
-        subplot_titles=(
-            "potential",
-            "field: the compact cloud equals the bare kernel beyond ε",
-        ),
+        rows=2,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.1,
+        subplot_titles=("potential", "field"),
     )
     fig.add_trace(
         go.Scatter(
@@ -128,7 +146,8 @@ def plot_kernels(output: Path) -> None:
             y=bare_phi,
             mode="lines",
             line={"color": "black", "dash": "dash"},
-            name="bare: ln r",
+            name="$\\text{bare: } \\Phi = \\ln r$",
+            legendgroup="bare",
         ),
         row=1,
         col=1,
@@ -139,7 +158,8 @@ def plot_kernels(output: Path) -> None:
             y=plummer_phi,
             mode="lines",
             line={"color": MPL_COLORS["C1"]},
-            name="Plummer: ½ ln(r² + ε²)",
+            name="$\\text{Plummer: } \\Phi = \\tfrac{1}{2} \\ln(r^2 + \\epsilon^2)$",
+            legendgroup="plummer",
         ),
         row=1,
         col=1,
@@ -150,14 +170,14 @@ def plot_kernels(output: Path) -> None:
             y=compact_phi,
             mode="lines",
             line={"color": MPL_COLORS["C2"]},
-            name="compact cloud (density ∝ (1 − r²/ε²)² inside ε)",
+            name="$\\text{compact cloud: } \\rho \\propto (1 - r^2/\\epsilon^2)^2$",
+            legendgroup="compact",
         ),
         row=1,
         col=1,
     )
     fig.add_vline(x=eps, line={"color": "rgb(153,153,153)", "width": 0.8}, row=1, col=1)
-    fig.update_xaxes(title_text="r / ε", row=1, col=1)
-    fig.update_yaxes(title_text="pair potential Φ", range=[-3, 1.6], row=1, col=1)
+    fig.update_yaxes(title_text="$\\Phi$", range=[-3, 1.6], row=1, col=1)
 
     fig.add_trace(
         go.Scatter(
@@ -165,10 +185,12 @@ def plot_kernels(output: Path) -> None:
             y=bare_g.real,
             mode="lines",
             line={"color": "black", "dash": "dash"},
-            name="bare: 1/r",
+            name="bare",
+            legendgroup="bare",
+            showlegend=False,
         ),
-        row=1,
-        col=2,
+        row=2,
+        col=1,
     )
     fig.add_trace(
         go.Scatter(
@@ -177,9 +199,11 @@ def plot_kernels(output: Path) -> None:
             mode="lines",
             line={"color": MPL_COLORS["C1"]},
             name="Plummer",
+            legendgroup="plummer",
+            showlegend=False,
         ),
-        row=1,
-        col=2,
+        row=2,
+        col=1,
     )
     fig.add_trace(
         go.Scatter(
@@ -188,9 +212,11 @@ def plot_kernels(output: Path) -> None:
             mode="lines",
             line={"color": MPL_COLORS["C2"]},
             name="compact cloud",
+            legendgroup="compact",
+            showlegend=False,
         ),
-        row=1,
-        col=2,
+        row=2,
+        col=1,
     )
     fig.add_trace(
         go.Scatter(
@@ -198,17 +224,17 @@ def plot_kernels(output: Path) -> None:
             y=np.abs(plummer_g - bare_g.real),
             mode="lines",
             line={"color": MPL_COLORS["C1"], "dash": "dot"},
-            name="|Plummer − bare| (never zero)",
+            name="$|\\text{Plummer} - \\text{bare}|\\ \\text{(field)}$",
         ),
-        row=1,
-        col=2,
+        row=2,
+        col=1,
     )
-    fig.add_vline(x=eps, line={"color": "rgb(153,153,153)", "width": 0.8}, row=1, col=2)
-    fig.update_xaxes(title_text="r / ε", row=1, col=2)
-    fig.update_yaxes(title_text="|∇Φ|", range=[0, 2.2], row=1, col=2)
+    fig.add_vline(x=eps, line={"color": "rgb(153,153,153)", "width": 0.8}, row=2, col=1)
+    fig.update_xaxes(title_text="$r / \\epsilon$", row=2, col=1)
+    fig.update_yaxes(title_text="$|\\nabla \\Phi|$", range=[0, 2.2], row=2, col=1)
     fig.update_layout(
-        title="Softening kernels: only a compact kernel keeps the multipole far field exact",
-        legend={"font": {"size": 9}},
+        title="Only a compact kernel keeps the multipole far field exact",
+        height=760,
     )
     save_figure(fig, output / "kernels")
 
@@ -225,12 +251,11 @@ def plot_weights(output: Path) -> None:
     s_left, ds_left = _smoothstep(-x / band)
 
     fig = make_subplots(
-        rows=1,
-        cols=2,
-        subplot_titles=(
-            "quintic smoothstep: C², s(t) + s(−t) = 1",
-            "the derivatives are opposite: the Φ∇w forces see Φ_L − Φ_L′",
-        ),
+        rows=2,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.1,
+        subplot_titles=("quintic smoothstep weights", "their derivatives"),
     )
     fig.add_trace(
         go.Scatter(
@@ -238,7 +263,7 @@ def plot_weights(output: Path) -> None:
             y=s_left,
             mode="lines",
             line={"color": MPL_COLORS["C0"]},
-            name="w_L (left leaf)",
+            name="$w_L\\ \\text{(left leaf)}$",
         ),
         row=1,
         col=1,
@@ -249,7 +274,7 @@ def plot_weights(output: Path) -> None:
             y=s_right,
             mode="lines",
             line={"color": MPL_COLORS["C1"]},
-            name="w_L' (right leaf)",
+            name="$w_{L'}\\ \\text{(right leaf)}$",
         ),
         row=1,
         col=1,
@@ -259,7 +284,7 @@ def plot_weights(output: Path) -> None:
             x=x,
             y=s_left + s_right,
             mode="lines",
-            line={"color": "black", "dash": "dash", "width": 0.8},
+            line={"color": "black", "dash": "dash", "width": 1},
             name="sum",
         ),
         row=1,
@@ -268,13 +293,12 @@ def plot_weights(output: Path) -> None:
     fig.add_vrect(
         x0=-band,
         x1=band,
-        fillcolor="rgb(230,230,230)",
-        opacity=0.6,
+        fillcolor="gray",
+        opacity=0.25,
         line_width=0,
         row=1,
         col=1,
     )
-    fig.update_xaxes(title_text="x (edge at 0)", row=1, col=1)
     fig.update_yaxes(title_text="weight", row=1, col=1)
 
     fig.add_trace(
@@ -283,10 +307,10 @@ def plot_weights(output: Path) -> None:
             y=-ds_left / band,
             mode="lines",
             line={"color": MPL_COLORS["C0"]},
-            name="dw_L/dx",
+            name="$dw_L/dx$",
         ),
-        row=1,
-        col=2,
+        row=2,
+        col=1,
     )
     fig.add_trace(
         go.Scatter(
@@ -294,15 +318,15 @@ def plot_weights(output: Path) -> None:
             y=ds_right / band,
             mode="lines",
             line={"color": MPL_COLORS["C1"]},
-            name="dw_L'/dx",
+            name="$dw_{L'}/dx$",
         ),
-        row=1,
-        col=2,
+        row=2,
+        col=1,
     )
-    fig.add_hline(y=0, line={"color": "black", "width": 0.5}, row=1, col=2)
-    fig.update_xaxes(title_text="x", row=1, col=2)
-    fig.update_yaxes(title_text="dw/dx", row=1, col=2)
-    fig.update_layout(legend={"font": {"size": 9}})
+    fig.add_hline(y=0, line={"color": "black", "width": 0.5}, row=2, col=1)
+    fig.update_xaxes(title_text="$x\\ \\text{(edge at 0)}$", row=2, col=1)
+    fig.update_yaxes(title_text="$dw/dx$", row=2, col=1)
+    fig.update_layout(title="Smoothstep weights of two neighbouring leaves", height=760)
     save_figure(fig, output / "weights")
 
 
@@ -383,49 +407,73 @@ def plot_band_study(output: Path, quick: bool) -> None:
     ).max()
 
     fig = make_subplots(
-        rows=1,
-        cols=3,
+        rows=3,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.08,
         subplot_titles=(
-            "accuracy: non-monotonic; a wide band averages\ntwo leaves' expansions and can even help",
-            "cost of P2M, L2P and the near field",
-            "energy: any band > 0 removes the drift",
+            "field accuracy",
+            "cost: memberships per particle",
+            "energy conservation",
         ),
     )
     fig.add_trace(
-        go.Scatter(x=fractions, y=errors, mode="lines+markers", showlegend=False),
+        go.Scatter(
+            x=fractions,
+            y=errors,
+            mode="lines+markers",
+            line={"color": MPL_COLORS["C0"]},
+            showlegend=False,
+        ),
         row=1,
         col=1,
     )
     fig.update_yaxes(
-        type="log", title_text="max field error (p = 12, θ = 0.5)", row=1, col=1
+        type="log", title_text="max field error", row=1, col=1, **_log_ticks(errors)
     )
     fig.add_trace(
-        go.Scatter(x=fractions, y=members, mode="lines+markers", showlegend=False),
-        row=1,
-        col=2,
+        go.Scatter(
+            x=fractions,
+            y=members,
+            mode="lines+markers",
+            line={"color": MPL_COLORS["C0"]},
+            showlegend=False,
+        ),
+        row=2,
+        col=1,
     )
-    fig.update_yaxes(title_text="memberships per particle", row=1, col=2)
+    fig.update_yaxes(title_text="memberships", row=2, col=1)
     fig.add_trace(
         go.Scatter(
             x=fractions,
             y=drifts,
             mode="lines+markers",
-            name="tree code (p = 2, θ = 0.8, co-moving)",
+            line={"color": MPL_COLORS["C0"]},
+            showlegend=False,
         ),
-        row=1,
-        col=3,
+        row=3,
+        col=1,
     )
-    fig.add_hline(
-        y=reference,
-        line={"color": "black", "dash": "dash", "width": 0.8},
-        annotation_text="direct sum (integrator alone)",
-        row=1,
-        col=3,
+    fig.add_trace(
+        go.Scatter(
+            x=[fractions[0], fractions[-1]],
+            y=[reference, reference],
+            mode="lines",
+            line={"color": "black", "dash": "dash", "width": 1},
+            name="direct sum (integrator alone)",
+        ),
+        row=3,
+        col=1,
     )
-    fig.update_yaxes(type="log", title_text="max |ΔE/E| over the run", row=1, col=3)
-    for col in (1, 2, 3):
-        fig.update_xaxes(title_text="band δ / smallest leaf half-width", row=1, col=col)
-    fig.update_layout(legend={"font": {"size": 9}})
+    fig.update_yaxes(
+        type="log",
+        title_text="$\\max |\\Delta E / E|$",
+        row=3,
+        col=1,
+        **_log_ticks([*drifts, reference]),
+    )
+    fig.update_xaxes(title_text="$\\delta / h_\\mathrm{min}$", row=3, col=1)
+    fig.update_layout(title="Band width: accuracy, cost and energy error", height=1140)
     save_figure(fig, output / "band_study")
 
 
@@ -464,11 +512,12 @@ def plot_cost_matched(output: Path, quick: bool) -> None:
     tolerances = np.logspace(-3, -11, 17)
 
     fig = make_subplots(
-        rows=1,
-        cols=2,
+        rows=2,
+        cols=1,
+        vertical_spacing=0.15,
         subplot_titles=(
-            "work at matched accuracy, best over θ ∈ [0.4, 0.8] and p ≤ 28",
-            "every (θ, p) combination",
+            "cheapest work at matched accuracy",
+            "$\\text{every } (\\theta, p) \\text{ combination}$",
         ),
     )
     for symmetric, color, label in (
@@ -486,6 +535,7 @@ def plot_cost_matched(output: Path, quick: bool) -> None:
                 mode="lines+markers",
                 line={"color": color},
                 name=label,
+                legendgroup=label,
             ),
             row=1,
             col=1,
@@ -498,27 +548,38 @@ def plot_cost_matched(output: Path, quick: bool) -> None:
                 mode="markers",
                 marker={"size": 7, "color": color, "opacity": 0.6},
                 name=label,
+                legendgroup=label,
                 showlegend=False,
             ),
-            row=1,
-            col=2,
+            row=2,
+            col=1,
         )
+    work = [r[4] for r in rows]
     fig.update_xaxes(
-        type="log", autorange="reversed", title_text="target field error", row=1, col=1
-    )
-    fig.update_yaxes(
         type="log",
-        title_text="cheapest work (M2L + near field, model units)",
+        autorange="reversed",
+        title_text="target field error",
         row=1,
         col=1,
+        **_log_ticks(tolerances),
+    )
+    fig.update_yaxes(
+        type="log", title_text="work (model units)", row=1, col=1, **_log_ticks(work)
     )
     fig.update_xaxes(
-        type="log", autorange="reversed", title_text="field error", row=1, col=2
+        type="log",
+        autorange="reversed",
+        title_text="field error",
+        row=2,
+        col=1,
+        **_log_ticks([r[3] for r in rows]),
     )
-    fig.update_yaxes(type="log", title_text="work", row=1, col=2)
+    fig.update_yaxes(
+        type="log", title_text="work (model units)", row=2, col=1, **_log_ticks(work)
+    )
     fig.update_layout(
-        title="Exact momentum (triangle) costs about the same as the standard truncation at equal accuracy",
-        legend={"font": {"size": 9}},
+        title="Exact momentum (triangle) costs about the same as the rectangle",
+        height=800,
     )
     save_figure(fig, output / "cost_matched")
 
@@ -572,16 +633,13 @@ def plot_long_run(output: Path, quick: bool) -> None:
                 x=times,
                 y=drift,
                 mode="lines",
-                line={"color": color, "width": 0.9},
+                line={"color": color, "width": 1.2},
                 name=label,
             )
         )
     fig.add_hline(y=0, line={"color": "black", "width": 0.5})
     fig.update_layout(
-        title=(
-            f"{steps} steps, N = {n}, p = {options['order']}, θ = {options['theta']}: "
-            "no secular drift with smooth membership"
-        ),
+        title=(f"No secular drift with smooth membership ({steps} steps, N = {n})"),
         xaxis_title="time",
         yaxis_title="relative energy error",
         legend={"font": {"size": 9}},
@@ -597,18 +655,20 @@ def plot_error_map(output: Path, quick: bool) -> None:
     pos, q = cloud(600 if quick else 1000, seed=8)
     tree = BoxTree(pos, Quad(0, 0, 1), leaf_capacity=8)
     _, ref = direct_fields(pos, q)
-    fig = make_subplots(rows=1, cols=2, subplot_titles=(" ", " "))
+    fig = make_subplots(
+        rows=2, cols=1, subplot_titles=(" ", " "), vertical_spacing=0.12
+    )
     vmin, vmax = 1e-9, 1e-4
     ticks = np.linspace(np.log10(vmin), np.log10(vmax), 6)
     shapes: list[dict] = []
-    for col, frac, title in (
+    for row, frac, title in (
         (1, 0.0, "hard membership"),
-        (2, 0.5, "smooth membership, band = 0.5 h_min"),
+        (2, 0.5, "smooth, δ = 0.5 h_min"),
     ):
         f = SmoothFMM(tree, pos, q, order=8, theta=0.6, band=frac * tree.min_leaf_half)
         _, e = f.fields()
         err = np.sqrt(((e - ref) ** 2).sum(axis=0)) / np.abs(ref).max()
-        xref, yref = (f"x{col}", f"y{col}") if col > 1 else ("x", "y")
+        xref, yref = (f"x{row}", f"y{row}") if row > 1 else ("x", "y")
         shapes += _box_shapes(
             tree, color="rgb(153,153,153)", width=0.3, xref=xref, yref=yref
         )
@@ -624,33 +684,57 @@ def plot_error_map(output: Path, quick: bool) -> None:
                     "colorscale": "Magma",
                     "cmin": ticks[0],
                     "cmax": ticks[-1],
-                    "showscale": col == 2,
+                    "showscale": row == 2,
                     "colorbar": (
                         {
-                            "title": "field error / max |E| (p = 8, θ = 0.6)",
+                            "title": {
+                                "text": "$|\\Delta E| / \\max |E|$",
+                                "side": "top",
+                            },
                             "tickvals": ticks,
                             "ticktext": [f"{10**t:.0e}" for t in ticks],
+                            "orientation": "h",
+                            "x": 0.5,
+                            "xanchor": "center",
+                            "y": -0.08,
+                            "yanchor": "top",
+                            "len": 1.0,
+                            "thickness": 14,
                         }
-                        if col == 2
+                        if row == 2
                         else None
                     ),
                 },
                 showlegend=False,
             ),
-            row=1,
-            col=col,
+            row=row,
+            col=1,
         )
-        fig.layout.annotations[col - 1].update(
+        fig.layout.annotations[row - 1].update(
             text=f"{title}: max error {err.max():.1e}"
         )
-        fig.update_xaxes(scaleanchor=yref, showgrid=False, row=1, col=col)
-        fig.update_yaxes(showgrid=False, row=1, col=col)
+        fig.update_xaxes(
+            range=[-1, 1],
+            scaleanchor=yref,
+            constrain="domain",
+            showgrid=False,
+            zeroline=False,
+            row=row,
+            col=1,
+        )
+        fig.update_yaxes(
+            range=[-1, 1],
+            constrain="domain",
+            showgrid=False,
+            zeroline=False,
+            row=row,
+            col=1,
+        )
     fig.update_layout(
         shapes=shapes,
-        title=(
-            "Where the error is: smooth membership leaves the error distribution unchanged "
-            "(no concentration at leaf edges)"
-        ),
+        title="Smooth membership leaves the error distribution unchanged",
+        height=900,
+        margin={"b": 110},
     )
     save_figure(fig, output / "error_map")
 
@@ -664,6 +748,7 @@ def plot_correction_term(output: Path, quick: bool) -> None:
     tree = BoxTree(pos, Quad(0, 0, 1), leaf_capacity=8)
     fig = go.Figure()
     bins = np.logspace(-8, 0, 40)
+    largest = bins[0]
     for frac, color in (
         (0.1, MPL_COLORS["C0"]),
         (0.25, MPL_COLORS["C1"]),
@@ -687,23 +772,29 @@ def plot_correction_term(output: Path, quick: bool) -> None:
         blended = counts > 1
         ratio = np.abs(pdw[blended]) / np.abs(wg).max()
         counts_hist, edges = np.histogram(np.clip(ratio, bins[0], bins[-1]), bins=bins)
+        if counts_hist.any():
+            largest = max(largest, edges[np.flatnonzero(counts_hist)[-1] + 1])
         fig.add_trace(
             go.Scatter(
                 x=edges[:-1],
                 y=counts_hist,
                 mode="lines",
                 line={"color": color, "width": 1.5, "shape": "hv"},
-                name=f"band = {frac} h_min  ({blended.sum()} blended particles)",
+                name=(
+                    f"$\\delta = {frac}\\, h_\\mathrm{{min}}\\ "
+                    f"\\text{{({blended.sum()} blended)}}$"
+                ),
             )
         )
     fig.update_xaxes(
-        type="log", title_text="|Φ ∇w term| / max |w G term|   (per blended particle)"
+        type="log",
+        range=[np.log10(bins[0]), np.log10(largest) + 0.3],
+        dtick=1,
+        exponentformat="power",
+        title_text="$|\\Phi \\nabla w| / \\max |w G|$",
     )
     fig.update_yaxes(title_text="particles")
-    fig.update_layout(
-        title="The exact-gradient correction is small (truncation error / band width) but not negligible",
-        legend={"font": {"size": 9}},
-    )
+    fig.update_layout(title="The exact-gradient correction is small but not negligible")
     save_figure(fig, output / "correction_term")
 
 

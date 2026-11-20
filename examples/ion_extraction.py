@@ -79,13 +79,14 @@ def _add_player(
 ) -> None:
     """A Play button and a frame slider, as ``plasma_plots.heatmap_movie`` does for heatmaps."""
     fig.update_layout(
+        margin={"b": 120},
         updatemenus=[
             {
                 "type": "buttons",
                 "showactive": False,
                 "x": 0.0,
                 "xanchor": "left",
-                "y": -0.18,
+                "y": -0.12,
                 "yanchor": "top",
                 "buttons": [
                     {
@@ -118,9 +119,11 @@ def _add_player(
                     }
                     for frame in frames
                 ],
-                "x": 0.12,
-                "len": 0.88,
-                "y": -0.1,
+                "x": 0.0,
+                "len": 1.0,
+                "y": -0.22,
+                "yanchor": "top",
+                "pad": {"t": 10},
                 "currentvalue": {"prefix": prefix},
             },
         ],
@@ -314,18 +317,25 @@ def plot_geometry(output: Path, source: ExtractionSource, v_ext: float) -> None:
             x=midpoints[0],
             y=midpoints[1],
             mode="markers",
-            marker={"size": 3, "color": "black"},
+            marker={"size": 3, "color": MPL_COLORS["C1"]},
             name=f"panel midpoints ({source.electrodes.num_panels})",
         )
     )
-    for x, v, label in ((X0, 0.0, "plasma electrode"), (X1, -v_ext, "extractor")):
+    # one label above the plates, the other below them, so that they cannot overlap
+    edge = PLATE_LENGTH + max(A0, A1)
+    for x, v, label, y, anchor in (
+        (X0, 0.0, "plasma electrode", edge, "bottom"),
+        (X1, -v_ext, "extractor", -edge, "top"),
+    ):
         fig.add_annotation(
-            x=x, y=PLATE_LENGTH + 2.0, text=f"{label}<br>V = {v:g}", showarrow=False
+            x=x, y=y, text=f"{label}<br>V = {v:g}", showarrow=False, yanchor=anchor
         )
+    top = edge + 3.5
     fig.update_xaxes(title_text="x", range=[X0 - 2, X1 + 2], showgrid=False)
-    fig.update_yaxes(title_text="y", scaleanchor="x", showgrid=False)
+    fig.update_yaxes(title_text="y", range=[-top, top], showgrid=False)
     fig.update_layout(
-        title="Plasma electrode and extractor, each a grounded or biased slit"
+        title="Plasma electrode and extractor",
+        legend={"orientation": "h", "x": 0, "y": -0.12, "yanchor": "top"},
     )
     save_figure(fig, output / "geometry")
 
@@ -398,14 +408,36 @@ def plot_envelope(
             showlegend=False,
         )
     )
-    for x_e, half_ap in ((X0, A0), (X1, A1)):
-        fig.add_hline(y=half_ap, line={"color": "gray", "dash": "dot"})
-        fig.add_vline(x=x_e, line={"color": "gray", "dash": "dot"})
-    fig.update_xaxes(title_text="x")
-    fig.update_yaxes(title_text="beam rms half-width (time-averaged)")
-    fig.update_layout(
-        title="Beam envelope: narrow at the plasma electrode, spreading beyond it"
-    )
+    for x_e, half_ap, name, color in (
+        (X0, A0, "plasma electrode", MPL_COLORS["C1"]),
+        (X1, A1, "extractor", MPL_COLORS["C2"]),
+    ):
+        fig.add_hline(y=half_ap, line={"color": color, "dash": "dot"})
+        fig.add_vline(x=x_e, line={"color": color, "dash": "dot"})
+        fig.add_annotation(
+            x=x_e,
+            y=1,
+            yref="paper",
+            text=name,
+            textangle=-90,
+            xanchor="right",
+            yanchor="top",
+            showarrow=False,
+            font={"color": color},
+        )
+        fig.add_annotation(
+            x=1,
+            xref="paper",
+            y=half_ap,
+            text=f"{name} half-aperture",
+            xanchor="right",
+            yanchor="bottom",
+            showarrow=False,
+            font={"color": color},
+        )
+    fig.update_xaxes(title_text="x (code units)")
+    fig.update_yaxes(title_text="rms half-width (code units)")
+    fig.update_layout(title="Beam envelope, time-averaged")
     save_figure(fig, output / "envelope")
 
 
@@ -443,9 +475,7 @@ def plot_transmission_scaling(
     )
     fig.update_xaxes(title_text="macroparticle charge (space-charge strength)")
     fig.update_yaxes(title_text="transmission past the extractor (%)")
-    fig.update_layout(
-        title="Space-charge-limited extraction: the extractor intercepts more as the beam's own repulsion grows"
-    )
+    fig.update_layout(title="Transmission against the beam's space charge")
     save_figure(fig, output / "transmission_scaling")
 
 
@@ -457,16 +487,6 @@ def animate_beam_formation(
 ) -> None:
     """Figure 5."""
     fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=[],
-            y=[],
-            mode="markers",
-            marker={"size": 3, "color": MPL_COLORS["C0"], "opacity": 0.6},
-            showlegend=False,
-        )
-    )
-    add_plates(fig, source)
     fig.update_xaxes(
         title_text="x", range=[RESERVOIR_X[0] - 1, source.x_final + 1], showgrid=False
     )
@@ -478,24 +498,39 @@ def animate_beam_formation(
     )
 
     frame_list = []
-    for frame_i in range(frames):
+    for _ in range(frames):
         for _ in range(steps_per_frame):
             source.step()
+        transmission = source.transmission()
         title = (
-            f"t = {source.time:.2f}: transmission = {100 * source.transmission():.0f}%"
+            f"t = {source.time:.2f}: transmission = {100 * transmission:.0f}%"
+            if np.isfinite(transmission)
+            else f"t = {source.time:.2f}: no ion collected or lost yet"
         )
         frame_list.append(
             go.Frame(
-                name=f"{frame_i}",
+                name=f"{source.time:.2f}",
                 data=[go.Scatter(x=source.pos[0], y=source.pos[1])],
                 traces=[0],
                 layout=go.Layout(title=title),
             )
         )
+    # the initial trace shows frame 0, so that the figure is not empty before Play
+    first = frame_list[0].data[0] if frame_list else go.Scatter(x=[], y=[])
+    fig.add_trace(
+        go.Scatter(
+            x=first.x,
+            y=first.y,
+            mode="markers",
+            marker={"size": 3, "color": MPL_COLORS["C0"], "opacity": 0.6},
+            showlegend=False,
+        )
+    )
+    add_plates(fig, source)
     fig.frames = frame_list
     if frame_list:
         fig.update_layout(title=frame_list[0].layout.title.text)
-    _add_player(fig, frame_list, prefix="frame ")
+    _add_player(fig, frame_list, prefix="t = ")
     save_figure(fig, output / "beam_formation", frame=-1)
 
 

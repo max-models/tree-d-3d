@@ -309,20 +309,28 @@ def main(argv: list[str] | None = None) -> Path:
                 x=t / TRANSIT,
                 y=smooth(np.asarray(data) / J_CL, window),
                 mode="lines",
-                name=f"{name} (running mean over 0.2 transit times)",
+                name=name,
                 line={"color": color},
             )
         )
     fig.add_hline(
-        y=1.0, line={"dash": "dash", "color": "black"}, annotation_text="J_CL"
+        y=1.0,
+        line={"dash": "dash", "color": "black"},
+        annotation_text="$J_\\mathrm{CL}$",
     )
     fig.update_xaxes(title_text="time / transit time")
-    fig.update_yaxes(title_text="current density / J_CL", range=[-0.2, 3])
-    fig.update_layout(title="Emitted and collected current density of the planar diode")
+    fig.update_yaxes(title_text="$J / J_\\mathrm{CL}$", range=[-0.2, 3])
+    fig.update_layout(title="Current densities (running mean over 0.2 transit times)")
     save_figure(fig, output / "current")
 
     # 2. potential and field profiles
-    fig = make_subplots(rows=1, cols=2, subplot_titles=("potential", "field E_x"))
+    fig = make_subplots(
+        rows=2,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.1,
+        subplot_titles=("potential", "$\\text{field } E_x$"),
+    )
     x_cl = np.linspace(0, GAP, 200)
     fig.add_trace(
         go.Scatter(
@@ -340,7 +348,7 @@ def main(argv: list[str] | None = None) -> Path:
             x=x_cl,
             y=VOLTAGE * (x_cl / GAP) ** (4 / 3),
             mode="lines",
-            name="Child-Langmuir V (x/d)^(4/3)",
+            name="$\\text{Child-Langmuir } V (x/d)^{4/3}$",
             line={"color": "black", "dash": "dash"},
         ),
         row=1,
@@ -351,7 +359,7 @@ def main(argv: list[str] | None = None) -> Path:
             x=x_cl,
             y=VOLTAGE * x_cl / GAP,
             mode="lines",
-            name="vacuum V x/d",
+            name="$\\text{vacuum } V x/d$",
             line={"color": "gray", "dash": "dot"},
         ),
         row=1,
@@ -366,24 +374,26 @@ def main(argv: list[str] | None = None) -> Path:
             marker={"color": COLORS["C0"]},
             showlegend=False,
         ),
-        row=1,
-        col=2,
+        row=2,
+        col=1,
     )
     fig.add_trace(
         go.Scatter(
             x=x_cl,
             y=-4 / 3 * VOLTAGE / GAP * (x_cl / GAP) ** (1 / 3),
             mode="lines",
-            name="Child-Langmuir -4/3 V/d (x/d)^(1/3)",
+            name="$\\text{Child-Langmuir } -\\tfrac{4}{3} (V/d) (x/d)^{1/3}$",
             line={"color": "black", "dash": "dash"},
         ),
-        row=1,
-        col=2,
+        row=2,
+        col=1,
     )
-    fig.update_xaxes(title_text="x / d")
-    fig.update_yaxes(title_text="phi / V", row=1, col=1)
-    fig.update_yaxes(title_text="E_x d / V", row=1, col=2)
-    fig.update_layout(title="Potential and field along the gap at the emitter's centre")
+    fig.update_xaxes(title_text="$x / d$", row=2, col=1)
+    fig.update_yaxes(title_text="$\\phi / V$", row=1, col=1)
+    fig.update_yaxes(title_text="$E_x d / V$", row=2, col=1)
+    fig.update_layout(
+        title="Potential and field along the gap at the emitter's centre", height=760
+    )
     save_figure(fig, output / "potential")
 
     # 3. density profile
@@ -405,11 +415,11 @@ def main(argv: list[str] | None = None) -> Path:
             x=x_n,
             y=J_CL / np.sqrt(2 * VOLTAGE) * (x_n / GAP) ** (-2 / 3),
             mode="lines",
-            name="Child-Langmuir J_CL / v(x)",
+            name="$\\text{Child-Langmuir } J_\\mathrm{CL} / v(x)$",
             line={"color": "black", "dash": "dash"},
         )
     )
-    fig.update_xaxes(title_text="x / d")
+    fig.update_xaxes(title_text="$x / d$")
     fig.update_yaxes(
         title_text="electron density", range=[0, 4 * J_CL / np.sqrt(2 * VOLTAGE)]
     )
@@ -424,7 +434,7 @@ def main(argv: list[str] | None = None) -> Path:
             x=diode.x[0, in_core],
             y=diode.v[0, in_core],
             mode="markers",
-            marker={"size": 3, "color": COLORS["C0"], "opacity": 0.5},
+            marker={"size": 3, "color": COLORS["C0"], "opacity": 0.6},
             name="electrons at the end of the run",
         )
     )
@@ -433,13 +443,13 @@ def main(argv: list[str] | None = None) -> Path:
             x=x_cl,
             y=np.sqrt(2 * VOLTAGE * (x_cl / GAP) ** (4 / 3)),
             mode="lines",
-            name="Child-Langmuir sqrt(2 phi)",
+            name="$\\text{Child-Langmuir } \\sqrt{2 \\phi}$",
             line={"color": "black", "dash": "dash"},
         )
     )
-    fig.update_xaxes(title_text="x / d")
-    fig.update_yaxes(title_text="v_x")
-    fig.update_layout(title="Electron phase space (x, v_x) in the steady state")
+    fig.update_xaxes(title_text="$x / d$")
+    fig.update_yaxes(title_text="$v_x$")
+    fig.update_layout(title="Electron phase space in the steady state")
     save_figure(fig, output / "phase_space")
 
     # 5. the emission loop against the time step
@@ -460,13 +470,15 @@ def main(argv: list[str] | None = None) -> Path:
                 x=times / TRANSIT,
                 y=smooth(np.asarray(current) / J_CL, max(1, int(0.2 * TRANSIT / step))),
                 mode="lines",
-                name=f"dt = {step}",
+                name=f"$\\Delta t = {step}$",
                 line={"color": COLORS[f"C{i % 4}"]},
             )
         )
     fig.add_hline(y=1.0, line={"dash": "dash", "color": "black"})
     fig.update_xaxes(title_text="time / transit time")
-    fig.update_yaxes(title_text="collected current density / J_CL", range=[-0.2, 3])
+    fig.update_yaxes(
+        title_text="$J_\\text{collected} / J_\\mathrm{CL}$", range=[-0.2, 3]
+    )
     fig.update_layout(
         title="Collected current for several time steps (same macroparticle charge)"
     )
@@ -486,7 +498,6 @@ def main(argv: list[str] | None = None) -> Path:
                     )
                 ],
                 name=f"{time:.2f}",
-                layout={"title": f"t = {time / TRANSIT:.2f} transit times"},
             )
         )
     fig = go.Figure(data=frames[0].data, frames=frames)
@@ -510,13 +521,18 @@ def main(argv: list[str] | None = None) -> Path:
         y1=width / 2,
         line={"color": COLORS["C3"], "width": 3},
     )
-    fig.update_xaxes(title_text="x / d", range=[-0.05, GAP + 0.05])
-    fig.update_yaxes(title_text="y / d", range=[-width / 2 - 0.1, width / 2 + 0.1])
+    fig.update_xaxes(title_text="$x / d$", range=[-0.05, GAP + 0.05])
+    fig.update_yaxes(title_text="$y / d$", range=[-width / 2 - 0.1, width / 2 + 0.1])
     fig.update_layout(
-        title="Electrons from vacuum to the Child-Langmuir flow",
+        title="Electrons from vacuum to the steady flow",
+        margin={"b": 120},
         updatemenus=[
             {
                 "type": "buttons",
+                "x": 0,
+                "xanchor": "left",
+                "y": -0.12,
+                "yanchor": "top",
                 "buttons": [
                     {
                         "label": "Play",
@@ -543,11 +559,17 @@ def main(argv: list[str] | None = None) -> Path:
                                 "mode": "immediate",
                             },
                         ],
-                        "label": f.name,
+                        "label": f"{time / TRANSIT:.1f}",
                         "method": "animate",
                     }
-                    for f in frames
-                ]
+                    for f, (time, _) in zip(frames, snapshots, strict=True)
+                ],
+                "x": 0,
+                "len": 1.0,
+                "y": -0.22,
+                "yanchor": "top",
+                "pad": {"t": 10},
+                "currentvalue": {"prefix": "t / transit time = "},
             }
         ],
     )

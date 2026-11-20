@@ -17,16 +17,19 @@ Runs the experiments behind ``tree_d_3d.smooth`` and saves one figure per claim:
    smooth membership with co-moving boxes.
 6. ``momentum_drift``: the net force over the same runs.
 7. ``trajectories``: the particle trajectories of the conserving run over the fixed
-   leaf boxes, and the distance of each variant's trajectories from the direct sum's.
+   leaf boxes (red: positive, blue: negative charges, dots: start), and the distance
+   of each variant's trajectories from the direct sum's, which grows exponentially for
+   every variant (N-body chaos).
 8. ``trajectories_gentle``: a small ring of like charges orbiting in the trap,
    where the orbits are recognisable: the conserving tree code's trajectories over the
    direct sum's, and the energy error of both.
 9. ``cloud``: the trapped cloud under the conserving scheme, animated, with its
    energy error.
 10. ``orbits``: the ring of like charges, tree code over direct sum, animated.
-11. ``membership``: a tracer crossing leaf edges, animated, with its leaf weights.
+11. ``membership``: a tracer crossing leaf edges, animated, with its leaf weights;
+    the dotted boxes are the leaves grown by the smooth band.
 12. ``tree``: the quadtree rebuilt every frame while the particles move, animated:
-    leaves that split and merge.
+    leaves that split and merge (new leaves green, just removed ones red dashed).
 
 Usage::
 
@@ -121,9 +124,19 @@ def _box_shapes(tree, **kw) -> list[dict]:
 
 
 def _add_player(
-    fig: go.Figure, frames: list[go.Frame], *, duration: int = 40, prefix: str = "t = "
+    fig: go.Figure,
+    frames: list[go.Frame],
+    *,
+    duration: int = 40,
+    prefix: str = "t = ",
+    labels: list[str] | None = None,
 ) -> None:
-    """A Play button and a frame slider, as ``plasma_plots.heatmap_movie`` does for heatmaps."""
+    """A Play button and a frame slider, as ``plasma_plots.heatmap_movie`` does for heatmaps.
+
+    ``labels`` are the slider's step labels (default: the frame names).
+    """
+    if labels is None:
+        labels = [frame.name for frame in frames]
     fig.update_layout(
         updatemenus=[
             {
@@ -131,7 +144,7 @@ def _add_player(
                 "showactive": False,
                 "x": 0.0,
                 "xanchor": "left",
-                "y": -0.18,
+                "y": -0.12,
                 "yanchor": "top",
                 "buttons": [
                     {
@@ -159,14 +172,16 @@ def _add_player(
                                 "mode": "immediate",
                             },
                         ],
-                        "label": frame.name,
+                        "label": label,
                         "method": "animate",
                     }
-                    for frame in frames
+                    for frame, label in zip(frames, labels)
                 ],
-                "x": 0.12,
-                "len": 0.88,
-                "y": -0.1,
+                "x": 0.0,
+                "len": 1.0,
+                "y": -0.22,
+                "yanchor": "top",
+                "pad": {"t": 10},
                 "currentvalue": {"prefix": prefix},
             },
         ],
@@ -219,13 +234,13 @@ def plot_truncation(rows, output: Path) -> None:
         (
             3,
             "truncation_accuracy",
-            "max field error relative to the direct sum",
+            "max relative field error",
             "Accuracy: the triangle needs ~4 more orders",
         ),
         (
             4,
             "truncation_momentum",
-            "net force / sum of |forces|",
+            "$\\text{net force}/\\sum |F|$",
             "Momentum: pair antisymmetry of the M2L truncation",
         ),
     ):
@@ -233,8 +248,8 @@ def plot_truncation(rows, output: Path) -> None:
         for theta in thetas:
             color = theta_colors[theta]
             for symmetric, dash, symbol, label in (
-                (False, "solid", "circle", "rectangle (standard)"),
-                (True, "dash", "square", "triangle (symmetric)"),
+                (False, "solid", "circle", "rectangle"),
+                (True, "dash", "square", "triangle"),
             ):
                 sel = [r for r in rows if r[0] == theta and r[2] == symmetric]
                 fig.add_trace(
@@ -244,14 +259,16 @@ def plot_truncation(rows, output: Path) -> None:
                         mode="lines+markers",
                         line={"color": color, "dash": dash},
                         marker={"symbol": symbol, "color": color},
-                        name=f"{label}, θ = {theta}",
+                        name=f"$\\text{{{label}, }}\\theta = {theta}$",
                     )
                 )
         fig.update_layout(
             title=title,
-            xaxis_title="expansion order p",
+            xaxis_title="$\\text{expansion order } p$",
             yaxis_title=ylabel,
             yaxis_type="log",
+            yaxis_dtick=1,
+            yaxis_exponentformat="power",
             legend={"font": {"size": 10}},
         )
         save_figure(fig, output / name)
@@ -281,13 +298,13 @@ def plot_partition_of_unity(output: Path) -> None:
     w_leaf = w_leaf.reshape(gx.shape)
 
     fig = make_subplots(
-        rows=1,
-        cols=2,
+        rows=2,
+        cols=1,
         subplot_titles=(
-            "weight w_L of one leaf (band = half its width / 2)",
+            "$\\text{weight } w_L \\text{ of one leaf}$",
             "sum of all leaf weights",
         ),
-        horizontal_spacing=0.14,
+        vertical_spacing=0.1,
     )
     fig.add_trace(
         go.Heatmap(
@@ -297,7 +314,7 @@ def plot_partition_of_unity(output: Path) -> None:
             zmin=0,
             zmax=1.0,
             colorscale="Viridis",
-            colorbar={"x": 0.43, "len": 0.9},
+            colorbar={"len": 1.0, "y": 0.5, "title": {"text": "weight"}},
         ),
         row=1,
         col=1,
@@ -310,16 +327,16 @@ def plot_partition_of_unity(output: Path) -> None:
             zmin=0,
             zmax=1.001,
             colorscale="Viridis",
-            colorbar={"x": 1.0, "len": 0.9},
+            showscale=False,
         ),
-        row=1,
-        col=2,
+        row=2,
+        col=1,
     )
     fig.update_layout(
         shapes=_box_shapes(tree, color="white", width=0.6, xref="x", yref="y")
         + _box_shapes(tree, color="white", width=0.6, xref="x2", yref="y2")
     )
-    for col in (1, 2):
+    for row in (1, 2):
         fig.add_trace(
             go.Scatter(
                 x=pos[0],
@@ -328,35 +345,47 @@ def plot_partition_of_unity(output: Path) -> None:
                 marker={"size": 3, "color": "black", "opacity": 0.6},
                 showlegend=False,
             ),
-            row=1,
-            col=col,
+            row=row,
+            col=1,
         )
     c, h = tree.center[middle], tree.half[middle]
     fig.update_xaxes(
         range=[c.real - 4 * h, c.real + 4 * h],
         scaleanchor="y",
+        constrain="domain",
         showgrid=False,
         row=1,
         col=1,
     )
     fig.update_yaxes(
-        range=[c.imag - 4 * h, c.imag + 4 * h], showgrid=False, row=1, col=1
+        range=[c.imag - 4 * h, c.imag + 4 * h],
+        constrain="domain",
+        showgrid=False,
+        row=1,
+        col=1,
     )
-    fig.update_xaxes(scaleanchor="y2", showgrid=False, row=1, col=2)
-    fig.update_yaxes(showgrid=False, row=1, col=2)
+    fig.update_xaxes(
+        range=[-1, 1],
+        scaleanchor="y2",
+        constrain="domain",
+        showgrid=False,
+        row=2,
+        col=1,
+    )
+    fig.update_yaxes(range=[-1, 1], constrain="domain", showgrid=False, row=2, col=1)
     fig.add_annotation(
         text=f"max |Σw − 1| = {np.abs(total - 1).max():.1e}",
         x=-0.95,
         y=-0.95,
         xref="x2",
         yref="y2",
+        xanchor="left",
+        yanchor="bottom",
         showarrow=False,
         font={"color": "white"},
     )
-    fig.update_layout(
-        title="Smooth membership is a partition of unity on the adaptive leaves"
-    )
-    save_figure(fig, output / "partition_of_unity")
+    fig.update_layout(title="Smooth membership is a partition of unity", height=800)
+    save_figure(fig, output / "partition_of_unity", height=800)
 
 
 # -- 4: gradient check ------------------------------------------------------------
@@ -399,11 +428,12 @@ def plot_gradient_check(output: Path, n: int = 300) -> None:
     scale = np.abs(force).max()
 
     fig = make_subplots(
-        rows=1,
-        cols=2,
+        rows=2,
+        cols=1,
+        vertical_spacing=0.15,
         subplot_titles=(
-            "Forces are the exact gradient of the energy",
-            f"max mismatch {np.abs(numeric - analytic).max() / scale:.1e}",
+            "force against energy gradient",
+            f"mismatch, max {np.abs(numeric - analytic).max() / scale:.1e}",
         ),
     )
     fig.add_trace(
@@ -428,17 +458,25 @@ def plot_gradient_check(output: Path, n: int = 300) -> None:
                 "cmin": 1,
                 "cmax": 4,
                 "colorscale": "Viridis",
-                "colorbar": {"title": "leaves the particle belongs to", "x": 0.43},
+                "colorbar": {
+                    "title": {"text": "leaves"},
+                    "len": 0.43,
+                    "y": 1.0,
+                    "yanchor": "top",
+                    "dtick": 1,
+                },
             },
             showlegend=False,
         ),
         row=1,
         col=1,
     )
-    fig.update_xaxes(
-        title_text="analytic force component  2q Σ [w G + Φ ∇w]", row=1, col=1
+    fig.update_xaxes(title_text="$\\text{analytic force } F$", row=1, col=1)
+    fig.update_yaxes(
+        title_text="$-\\partial U/\\partial x\\ \\text{(finite differences)}$",
+        row=1,
+        col=1,
     )
-    fig.update_yaxes(title_text="−dU/dx by central differences", row=1, col=1)
 
     fig.add_trace(
         go.Scatter(
@@ -447,22 +485,29 @@ def plot_gradient_check(output: Path, n: int = 300) -> None:
             marker={"size": 5},
             showlegend=False,
         ),
-        row=1,
-        col=2,
+        row=2,
+        col=1,
     )
     fig.add_hline(
         y=1e-8,
         line={"color": "black", "dash": "dash", "width": 0.8},
         annotation_text="finite-difference noise level",
         annotation_position="top left",
-        row=1,
-        col=2,
+        row=2,
+        col=1,
     )
     fig.update_yaxes(
-        type="log", range=[-13, -5], title_text="|F_fd − F| / max|F|", row=1, col=2
+        type="log",
+        range=[-13, -5],
+        dtick=1,
+        exponentformat="power",
+        title_text="$|F_\\mathrm{fd} - F|/\\max|F|$",
+        row=2,
+        col=1,
     )
-    fig.update_xaxes(title_text="sample", row=1, col=2)
-    save_figure(fig, output / "gradient_check")
+    fig.update_xaxes(title_text="sample", row=2, col=1)
+    fig.update_layout(height=800)
+    save_figure(fig, output / "gradient_check", height=800)
 
 
 # -- 5, 6: conservation over time -------------------------------------------------
@@ -528,11 +573,11 @@ def conservation_runs(n: int, steps: int, verbose: bool = True):
         return u, e
 
     cases = [
-        ("direct sum (integrator alone)", direct, "k"),
-        ("hard membership, boxes rebuilt every step", rebuilt, "C3"),
-        ("hard membership, fixed boxes", fixed(0.0), "C1"),
-        ("smooth membership, fixed boxes", fixed(0.5), "C0"),
-        ("smooth membership, fixed co-moving boxes", comoving, "C2"),
+        ("direct sum", direct, "k"),
+        ("hard, boxes rebuilt", rebuilt, "C3"),
+        ("hard, fixed boxes", fixed(0.0), "C1"),
+        ("smooth, fixed boxes", fixed(0.5), "C0"),
+        ("smooth, co-moving boxes", comoving, "C2"),
     ]
     results = []
     for label, fields, color in cases:
@@ -540,7 +585,7 @@ def conservation_runs(n: int, steps: int, verbose: bool = True):
         times, drift, net, history = verlet(pos, vel, q, m, dt, steps, k_trap, fields)
         if verbose:
             print(
-                f"  {label:44s} max|dE/E| {np.abs(drift).max():.2e}  "
+                f"  {label:24s} max|dE/E| {np.abs(drift).max():.2e}  "
                 f"final {drift[-1]:+.2e}  net force {net.max():.1e}  ({time.time() - t0:.0f}s)"
             )
         results.append((label, color, times, drift, net, history))
@@ -563,11 +608,11 @@ def plot_conservation(results, info, output: Path) -> None:
     fig.add_hline(y=0, line={"color": "black", "width": 0.5})
     fig.update_layout(
         title=(
-            f"Energy: N = {info['n']}, p = {info['order']}, θ = {info['theta']}, "
-            f"Δt = {info['dt']} (Verlet)"
+            f"$\\text{{Energy: }} N = {info['n']},\\ p = {info['order']},\\ "
+            f"\\theta = {info['theta']},\\ \\Delta t = {info['dt']}$"
         ),
         xaxis_title="time",
-        yaxis_title="relative energy error  (E − E₀) / |E₀|",
+        yaxis_title="$(E - E_0)/|E_0|$",
         legend={"font": {"size": 10}},
     )
     save_figure(fig, output / "energy_drift")
@@ -584,10 +629,12 @@ def plot_conservation(results, info, output: Path) -> None:
             )
         )
     fig.update_layout(
-        title="Momentum: symmetric truncation, and co-moving boxes for the smooth terms",
+        title="Momentum: net force of each run",
         xaxis_title="time",
-        yaxis_title="net force / sum of |forces|",
+        yaxis_title="$\\text{net force}/\\sum |F|$",
         yaxis_type="log",
+        yaxis_dtick=1,
+        yaxis_exponentformat="power",
         legend={"font": {"size": 10}},
     )
     save_figure(fig, output / "momentum_drift")
@@ -601,13 +648,12 @@ def plot_trajectories(results, info, output: Path) -> None:
     history = conserving[5]
 
     fig = make_subplots(
-        rows=1,
-        cols=2,
+        rows=2,
+        cols=1,
+        vertical_spacing=0.12,
         subplot_titles=(
-            f"{conserving[0]}<br><span style='font-size:11px'>"
-            "red: +, blue: −, dots: start; grey: the fixed leaf boxes</span>",
-            "Distance from the direct-sum trajectories<br>"
-            "<span style='font-size:11px'>(grows exponentially for every variant: N-body chaos)</span>",
+            f"trajectories, {conserving[0]}",
+            "distance from the direct sum",
         ),
     )
     fig.update_layout(shapes=_box_shapes(tree, color="rgb(153,153,153)", width=0.3))
@@ -636,8 +682,17 @@ def plot_trajectories(results, info, output: Path) -> None:
         row=1,
         col=1,
     )
-    fig.update_xaxes(range=[-1.3, 1.3], scaleanchor="y", showgrid=False, row=1, col=1)
-    fig.update_yaxes(range=[-1.3, 1.3], showgrid=False, row=1, col=1)
+    fig.update_xaxes(
+        range=[-1.3, 1.3],
+        scaleanchor="y",
+        constrain="domain",
+        showgrid=False,
+        row=1,
+        col=1,
+    )
+    fig.update_yaxes(
+        range=[-1.3, 1.3], constrain="domain", showgrid=False, row=1, col=1
+    )
 
     for label, color, times, _, _, hist in results[1:]:
         distance = np.sqrt(((hist - reference) ** 2).sum(axis=1)).max(axis=1)
@@ -649,15 +704,20 @@ def plot_trajectories(results, info, output: Path) -> None:
                 line={"color": _c(color), "width": 1.2},
                 name=label,
             ),
-            row=1,
-            col=2,
+            row=2,
+            col=1,
         )
-    fig.update_xaxes(title_text="time", row=1, col=2)
+    fig.update_xaxes(title_text="time", row=2, col=1)
     fig.update_yaxes(
-        title_text="max over particles of |x − x_direct|", type="log", row=1, col=2
+        title_text="$\\max_i |x_i - x_{i,\\mathrm{direct}}|$",
+        type="log",
+        dtick=1,
+        exponentformat="power",
+        row=2,
+        col=1,
     )
-    fig.update_layout(legend={"font": {"size": 10}})
-    save_figure(fig, output / "trajectories")
+    fig.update_layout(legend={"font": {"size": 10}}, height=800)
+    save_figure(fig, output / "trajectories", height=800)
 
 
 def plot_gentle_trajectories(output: Path, steps: int = 2000):
@@ -695,14 +755,24 @@ def plot_gentle_trajectories(output: Path, steps: int = 2000):
     )
 
     fig = make_subplots(
-        rows=1,
-        cols=2,
+        rows=2,
+        cols=1,
+        vertical_spacing=0.12,
         subplot_titles=(
-            "8 like charges in a trap: tree code (colour) over direct sum (dashed)<br>"
-            "<span style='font-size:11px'>max trajectory difference "
-            f"{np.sqrt(((hist_t - hist_d) ** 2).sum(axis=1)).max():.1e}</span>",
-            f"energy; net force of the tree code ≤ {net_t.max():.0e}",
+            "tree code over direct sum",
+            f"energy error; net force ≤ {net_t.max():.0e}",
         ),
+    )
+    fig.add_annotation(
+        text="max trajectory difference "
+        f"{np.sqrt(((hist_t - hist_d) ** 2).sum(axis=1)).max():.1e}",
+        xref="x domain",
+        yref="y domain",
+        x=0.5,
+        y=0.02,
+        xanchor="center",
+        yanchor="bottom",
+        showarrow=False,
     )
     fig.update_layout(shapes=_box_shapes(tree, color="rgb(153,153,153)", width=0.3))
     for i in range(n):
@@ -712,7 +782,7 @@ def plot_gentle_trajectories(output: Path, steps: int = 2000):
                 y=hist_d[:, 1, i],
                 mode="lines",
                 line={"color": "black", "width": 1.6, "dash": "dash"},
-                opacity=0.5,
+                opacity=0.6,
                 showlegend=False,
             ),
             row=1,
@@ -740,8 +810,17 @@ def plot_gentle_trajectories(output: Path, steps: int = 2000):
         row=1,
         col=1,
     )
-    fig.update_xaxes(range=[-1.5, 1.5], scaleanchor="y", showgrid=False, row=1, col=1)
-    fig.update_yaxes(range=[-1.5, 1.5], showgrid=False, row=1, col=1)
+    fig.update_xaxes(
+        range=[-1.5, 1.5],
+        scaleanchor="y",
+        constrain="domain",
+        showgrid=False,
+        row=1,
+        col=1,
+    )
+    fig.update_yaxes(
+        range=[-1.5, 1.5], constrain="domain", showgrid=False, row=1, col=1
+    )
 
     fig.add_trace(
         go.Scatter(
@@ -751,8 +830,8 @@ def plot_gentle_trajectories(output: Path, steps: int = 2000):
             line={"color": "black", "width": 1.2, "dash": "dash"},
             name="direct sum",
         ),
-        row=1,
-        col=2,
+        row=2,
+        col=1,
     )
     fig.add_trace(
         go.Scatter(
@@ -760,16 +839,16 @@ def plot_gentle_trajectories(output: Path, steps: int = 2000):
             y=drift_t,
             mode="lines",
             line={"color": MPL_COLORS["C2"], "width": 1.0},
-            name="smooth membership, fixed co-moving boxes",
+            name="smooth, co-moving boxes",
         ),
-        row=1,
-        col=2,
+        row=2,
+        col=1,
     )
-    fig.add_hline(y=0, line={"color": "black", "width": 0.5}, row=1, col=2)
-    fig.update_xaxes(title_text="time", row=1, col=2)
-    fig.update_yaxes(title_text="relative energy error", row=1, col=2)
-    fig.update_layout(legend={"font": {"size": 10}})
-    save_figure(fig, output / "trajectories_gentle")
+    fig.add_hline(y=0, line={"color": "black", "width": 0.5}, row=2, col=1)
+    fig.update_xaxes(title_text="time", row=2, col=1)
+    fig.update_yaxes(title_text="relative energy error", row=2, col=1)
+    fig.update_layout(legend={"font": {"size": 10}}, height=800)
+    save_figure(fig, output / "trajectories_gentle", height=800)
     return times, hist_d, hist_t, tree, q
 
 
@@ -784,16 +863,17 @@ def animate_cloud(results, info, output: Path, frames: int = 160) -> None:
     q, tree = info["q"], info["tree"]
 
     fig = make_subplots(
-        rows=1,
-        cols=2,
-        column_widths=[0.47, 0.53],
-        subplot_titles=(label, "energy error (faint: the other variants)"),
+        rows=2,
+        cols=1,
+        vertical_spacing=0.12,
+        subplot_titles=(label, "energy error (thin: the other runs)"),
     )
     fig.update_layout(shapes=_box_shapes(tree, color="rgb(153,153,153)", width=0.3))
+    x0 = history[idx[0]]
     fig.add_trace(
         go.Scatter(
-            x=[],
-            y=[],
+            x=x0[0, q > 0],
+            y=x0[1, q > 0],
             mode="markers",
             marker={"size": 6, "color": MPL_COLORS["C3"]},
             name="+",
@@ -803,8 +883,8 @@ def animate_cloud(results, info, output: Path, frames: int = 160) -> None:
     )
     fig.add_trace(
         go.Scatter(
-            x=[],
-            y=[],
+            x=x0[0, q < 0],
+            y=x0[1, q < 0],
             mode="markers",
             marker={"size": 6, "color": MPL_COLORS["C0"]},
             name="−",
@@ -812,8 +892,17 @@ def animate_cloud(results, info, output: Path, frames: int = 160) -> None:
         row=1,
         col=1,
     )
-    fig.update_xaxes(range=[-1.3, 1.3], scaleanchor="y", showgrid=False, row=1, col=1)
-    fig.update_yaxes(range=[-1.3, 1.3], showgrid=False, row=1, col=1)
+    fig.update_xaxes(
+        range=[-1.3, 1.3],
+        scaleanchor="y",
+        constrain="domain",
+        showgrid=False,
+        row=1,
+        col=1,
+    )
+    fig.update_yaxes(
+        range=[-1.3, 1.3], constrain="domain", showgrid=False, row=1, col=1
+    )
 
     for _, col_, t_, d_, _, _ in results:
         fig.add_trace(
@@ -822,30 +911,30 @@ def animate_cloud(results, info, output: Path, frames: int = 160) -> None:
                 y=d_,
                 mode="lines",
                 line={"color": _c(col_), "width": 0.8},
-                opacity=0.35,
+                opacity=0.6,
                 showlegend=False,
             ),
-            row=1,
-            col=2,
+            row=2,
+            col=1,
         )
     fig.add_trace(
         go.Scatter(
-            x=[],
-            y=[],
+            x=times[: idx[0] + 1],
+            y=drift[: idx[0] + 1],
             mode="lines",
-            line={"color": _c(color), "width": 1.6},
+            line={"color": _c(color), "width": 2.4},
             name=label,
         ),
-        row=1,
-        col=2,
+        row=2,
+        col=1,
     )
-    fig.add_hline(y=0, line={"color": "black", "width": 0.5}, row=1, col=2)
+    fig.add_hline(y=0, line={"color": "black", "width": 0.5}, row=2, col=1)
     lim = 1.2 * max(np.abs(r[3]).max() for r in results)
-    fig.update_xaxes(title_text="time", range=[0, times[-1]], row=1, col=2)
+    fig.update_xaxes(title_text="time", range=[0, times[-1]], row=2, col=1)
     fig.update_yaxes(
-        title_text="relative energy error", range=[-lim, lim], row=1, col=2
+        title_text="relative energy error", range=[-lim, lim], row=2, col=1
     )
-    fig.update_layout(legend={"font": {"size": 10}})
+    fig.update_layout(legend={"font": {"size": 10}}, height=880, margin={"b": 120})
 
     trace_pos_plus, trace_pos_minus = 0, 1
     trace_energy = len(results) + 2
@@ -864,8 +953,8 @@ def animate_cloud(results, info, output: Path, frames: int = 160) -> None:
             )
         )
     fig.frames = frame_list
-    _add_player(fig, frame_list, duration=40)
-    save_figure(fig, output / "cloud", frame=-1)
+    _add_player(fig, frame_list, duration=40, labels=[f"{times[k]:.2f}" for k in idx])
+    save_figure(fig, output / "cloud", frame=-1, height=880)
 
 
 def animate_orbits(
@@ -875,41 +964,6 @@ def animate_orbits(
     n = hist_t.shape[2]
     step = max(1, len(times) // frames)
     idx = np.arange(0, len(times), step)
-
-    fig = go.Figure()
-    fig.update_layout(shapes=_box_shapes(tree, color="rgb(153,153,153)", width=0.3))
-    for _ in range(n):
-        fig.add_trace(
-            go.Scatter(
-                x=[],
-                y=[],
-                mode="lines",
-                line={"color": "black", "width": 2.2},
-                opacity=0.35,
-                showlegend=False,
-            )
-        )
-    for i in range(n):
-        fig.add_trace(
-            go.Scatter(
-                x=[],
-                y=[],
-                mode="lines",
-                line={"color": MPL_COLORS[f"C{i % 10}"], "width": 1.0},
-                showlegend=False,
-            )
-        )
-    fig.add_trace(
-        go.Scatter(
-            x=[],
-            y=[],
-            mode="markers",
-            marker={"size": 7, "color": "black"},
-            showlegend=False,
-        )
-    )
-    fig.update_xaxes(range=[-1.2, 1.2], scaleanchor="y", showgrid=False)
-    fig.update_yaxes(range=[-1.2, 1.2], showgrid=False)
 
     frame_list = []
     for k in idx:
@@ -930,16 +984,50 @@ def animate_orbits(
                 data=data,
                 traces=list(range(2 * n + 1)),
                 layout=go.Layout(
-                    title=(
-                        "8 like charges: tree code (colour) over direct sum (black)<br>"
-                        f"t = {times[k]:.2f}, max |x − x_direct| = {dist:.1e}"
-                    )
+                    title=f"t = {times[k]:.2f}, max |x − x_direct| = {dist:.1e}"
                 ),
             )
         )
+
+    first = frame_list[0].data
+    fig = go.Figure()
+    fig.update_layout(shapes=_box_shapes(tree, color="rgb(153,153,153)", width=0.3))
+    for i in range(n):
+        fig.add_trace(
+            go.Scatter(
+                x=first[i].x,
+                y=first[i].y,
+                mode="lines",
+                line={"color": "black", "width": 2.2},
+                opacity=0.6,
+                showlegend=False,
+            )
+        )
+    for i in range(n):
+        fig.add_trace(
+            go.Scatter(
+                x=first[n + i].x,
+                y=first[n + i].y,
+                mode="lines",
+                line={"color": MPL_COLORS[f"C{i % 10}"], "width": 1.0},
+                showlegend=False,
+            )
+        )
+    fig.add_trace(
+        go.Scatter(
+            x=first[2 * n].x,
+            y=first[2 * n].y,
+            mode="markers",
+            marker={"size": 7, "color": "black"},
+            showlegend=False,
+        )
+    )
+    fig.update_xaxes(
+        range=[-1.2, 1.2], scaleanchor="y", constrain="domain", showgrid=False
+    )
+    fig.update_yaxes(range=[-1.2, 1.2], constrain="domain", showgrid=False)
     fig.frames = frame_list
-    if frame_list:
-        fig.update_layout(title=frame_list[0].layout.title.text)
+    fig.update_layout(title=frame_list[0].layout.title.text, margin={"b": 120})
     _add_player(fig, frame_list, duration=40)
     save_figure(fig, output / "orbits", frame=-1)
 
@@ -965,16 +1053,51 @@ def animate_membership(output: Path, frames: int = 150) -> None:
         for L in tree.leaves
     ]
 
+    tracer_trace, bar_trace = 2, 3
+    frame_list = []
+    for frame_i, z in enumerate(track):
+        part, leaf, w, _, _ = tree.memberships(np.array([z]), band)
+        order = np.argsort(-w)
+        leaf_sorted, w_sorted = leaf[order], w[order]
+        shaded = [
+            _rect(
+                tree.center[L].real,
+                tree.center[L].imag,
+                tree.half[L],
+                color="rgba(0,0,0,0)",
+                width=0,
+                fillcolor=MPL_COLORS["C1"],
+                opacity=float(0.6 * weight),
+            )
+            for L, weight in zip(leaf_sorted, w_sorted)
+        ]
+        # the same number of shapes in every frame (a point is in at most four leaves)
+        shaded += [
+            _rect(0.0, 0.0, 0.0, color="rgba(0,0,0,0)", width=0)
+            for _ in range(4 - len(shaded))
+        ]
+        labels = [f"leaf {int(L)}" for L in leaf_sorted] + ["sum"]
+        values = [*w_sorted.tolist(), float(w_sorted.sum())]
+        colors = [MPL_COLORS["C1"]] * len(leaf_sorted) + ["rgb(102,102,102)"]
+        frame_list.append(
+            go.Frame(
+                name=f"{frame_i}",
+                data=[
+                    go.Scatter(x=[z.real], y=[z.imag]),
+                    go.Bar(x=labels, y=values, marker_color=colors),
+                ],
+                traces=[tracer_trace, bar_trace],
+                layout=go.Layout(shapes=static_shapes + shaded),
+            )
+        )
+
     fig = make_subplots(
-        rows=1,
-        cols=2,
-        column_widths=[0.55, 0.45],
-        subplot_titles=(
-            "tracer (red); leaves (grey), leaves grown by the band (dotted)",
-            "membership weights (they sum to 1)",
-        ),
+        rows=2,
+        cols=1,
+        vertical_spacing=0.12,
+        subplot_titles=("tracer (red) and leaves", "membership weights"),
     )
-    fig.update_layout(shapes=static_shapes)
+    fig.update_layout(shapes=frame_list[0].layout.shapes)
     fig.add_trace(
         go.Scatter(
             x=pos[0],
@@ -997,10 +1120,11 @@ def animate_membership(output: Path, frames: int = 150) -> None:
         row=1,
         col=1,
     )
+    first_tracer, first_bars = frame_list[0].data
     fig.add_trace(
         go.Scatter(
-            x=[],
-            y=[],
+            x=first_tracer.x,
+            y=first_tracer.y,
             mode="markers",
             marker={"size": 10, "color": MPL_COLORS["C3"]},
             showlegend=False,
@@ -1009,51 +1133,37 @@ def animate_membership(output: Path, frames: int = 150) -> None:
         col=1,
     )
     fig.add_trace(
-        go.Bar(x=[], y=[], marker_color=MPL_COLORS["C1"], showlegend=False),
+        go.Bar(
+            x=first_bars.x,
+            y=first_bars.y,
+            marker_color=first_bars.marker.color,
+            showlegend=False,
+        ),
+        row=2,
+        col=1,
+    )
+    fig.update_xaxes(
+        range=[-0.75, 0.75],
+        scaleanchor="y",
+        constrain="domain",
+        showgrid=False,
         row=1,
-        col=2,
+        col=1,
     )
-    fig.update_xaxes(range=[-0.75, 0.75], scaleanchor="y", showgrid=False, row=1, col=1)
-    fig.update_yaxes(range=[-0.45, 0.6], showgrid=False, row=1, col=1)
     fig.update_yaxes(
-        range=[0, 1.05], title_text="weight w_L of the tracer in leaf L", row=1, col=2
+        range=[-0.45, 0.6], constrain="domain", showgrid=False, row=1, col=1
     )
-
-    tracer_trace, bar_trace = 2, 3
-    frame_list = []
-    for frame_i, z in enumerate(track):
-        part, leaf, w, _, _ = tree.memberships(np.array([z]), band)
-        order = np.argsort(-w)
-        leaf_sorted, w_sorted = leaf[order], w[order]
-        shaded = [
-            _rect(
-                tree.center[L].real,
-                tree.center[L].imag,
-                tree.half[L],
-                color="rgba(0,0,0,0)",
-                width=0,
-                fillcolor=MPL_COLORS["C1"],
-                opacity=float(0.6 * weight),
-            )
-            for L, weight in zip(leaf_sorted, w_sorted)
-        ]
-        labels = [f"leaf {int(L)}" for L in leaf_sorted] + ["sum"]
-        values = [*w_sorted.tolist(), float(w_sorted.sum())]
-        colors = [MPL_COLORS["C1"]] * len(leaf_sorted) + ["rgb(102,102,102)"]
-        frame_list.append(
-            go.Frame(
-                name=f"{frame_i}",
-                data=[
-                    go.Scatter(x=[z.real], y=[z.imag]),
-                    go.Bar(x=labels, y=values, marker_color=colors),
-                ],
-                traces=[tracer_trace, bar_trace],
-                layout=go.Layout(shapes=static_shapes + shaded),
-            )
-        )
+    fig.update_yaxes(range=[0, 1.05], title_text="$\\text{weight } w_L$", row=2, col=1)
     fig.frames = frame_list
-    _add_player(fig, frame_list, duration=50, prefix="frame ")
-    save_figure(fig, output / "membership", frame=-1)
+    fig.update_layout(height=880, margin={"b": 120})
+    _add_player(
+        fig,
+        frame_list,
+        duration=50,
+        prefix="tracer at x = ",
+        labels=[f"{z.real:.2f}" for z in track],
+    )
+    save_figure(fig, output / "membership", frame=-1, height=880)
 
 
 def animate_tree(
@@ -1082,78 +1192,6 @@ def animate_tree(
             round(tree.center[L].imag, 9),
             round(tree.half[L], 9),
         )
-
-    fig = make_subplots(
-        rows=1,
-        cols=2,
-        column_widths=[0.53, 0.47],
-        subplot_titles=(
-            "",
-            f"leaf capacity {capacity}: the box set changes constantly",
-        ),
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=[],
-            y=[],
-            mode="markers",
-            marker={"size": 5, "color": MPL_COLORS["C3"]},
-            showlegend=False,
-        ),
-        row=1,
-        col=1,
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=[],
-            y=[],
-            mode="markers",
-            marker={"size": 5, "color": MPL_COLORS["C0"]},
-            showlegend=False,
-        ),
-        row=1,
-        col=1,
-    )
-    fig.update_xaxes(range=[-1.6, 1.6], scaleanchor="y", showgrid=False, row=1, col=1)
-    fig.update_yaxes(range=[-1.6, 1.6], showgrid=False, row=1, col=1)
-    fig.add_trace(
-        go.Scatter(
-            x=[],
-            y=[],
-            mode="lines",
-            line={"color": "black", "width": 1.2},
-            name="leaves",
-        ),
-        row=1,
-        col=2,
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=[],
-            y=[],
-            mode="lines",
-            line={"color": MPL_COLORS["C2"], "width": 1.2},
-            name="leaves created this frame",
-        ),
-        row=1,
-        col=2,
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=[],
-            y=[],
-            mode="lines",
-            line={"color": MPL_COLORS["C3"], "width": 1.2},
-            name="leaves removed this frame",
-        ),
-        row=1,
-        col=2,
-    )
-    fig.update_xaxes(
-        title_text="time", range=[0, frames * steps_per_frame * dt], row=1, col=2
-    )
-    fig.update_yaxes(title_text="count", row=1, col=2)
-    fig.update_layout(legend={"font": {"size": 9}})
 
     dots_plus, dots_minus, line_leaves, line_new, line_gone = 0, 1, 2, 3, 4
     previous: set = set()
@@ -1193,10 +1231,7 @@ def animate_tree(
         counts.append(len(current))
         created.append(len(new) if frame_i else 0)
         removed.append(len(gone))
-        title = (
-            f"t = {t:.2f}: {len(current)} leaves, depth {int(tree.depth.max())}; "
-            "green: new this frame, red dashed: just removed"
-        )
+        title = f"t = {t:.2f}: {len(current)} leaves, depth {int(tree.depth.max())}"
         frame_list.append(
             go.Frame(
                 name=f"{t:.2f}",
@@ -1211,14 +1246,67 @@ def animate_tree(
                 layout=go.Layout(shapes=shapes, title=title),
             )
         )
-    fig.frames = frame_list
-    if frame_list:
-        fig.update_layout(
-            shapes=frame_list[0].layout.shapes, title=frame_list[0].layout.title.text
+
+    first = frame_list[0].data
+    fig = make_subplots(
+        rows=2,
+        cols=1,
+        vertical_spacing=0.12,
+        subplot_titles=("", f"leaf count, capacity {capacity}"),
+    )
+    for trace, color in ((dots_plus, MPL_COLORS["C3"]), (dots_minus, MPL_COLORS["C0"])):
+        fig.add_trace(
+            go.Scatter(
+                x=first[trace].x,
+                y=first[trace].y,
+                mode="markers",
+                marker={"size": 5, "color": color},
+                showlegend=False,
+            ),
+            row=1,
+            col=1,
         )
-    fig.update_yaxes(range=[0, max(counts) * 1.1], row=1, col=2)
-    _add_player(fig, frame_list, duration=50, prefix="frame ")
-    save_figure(fig, output / "tree", frame=-1)
+    fig.update_xaxes(
+        range=[-1.6, 1.6],
+        scaleanchor="y",
+        constrain="domain",
+        showgrid=False,
+        row=1,
+        col=1,
+    )
+    fig.update_yaxes(
+        range=[-1.6, 1.6], constrain="domain", showgrid=False, row=1, col=1
+    )
+    for trace, color, name in (
+        (line_leaves, "black", "leaves"),
+        (line_new, MPL_COLORS["C2"], "created this frame"),
+        (line_gone, MPL_COLORS["C3"], "removed this frame"),
+    ):
+        fig.add_trace(
+            go.Scatter(
+                x=first[trace].x,
+                y=first[trace].y,
+                mode="lines",
+                line={"color": color, "width": 1.2},
+                name=name,
+            ),
+            row=2,
+            col=1,
+        )
+    fig.update_xaxes(
+        title_text="time", range=[0, frames * steps_per_frame * dt], row=2, col=1
+    )
+    fig.update_yaxes(title_text="count", range=[0, max(counts) * 1.1], row=2, col=1)
+    fig.frames = frame_list
+    fig.update_layout(
+        legend={"font": {"size": 9}},
+        shapes=frame_list[0].layout.shapes,
+        title=frame_list[0].layout.title.text,
+        height=880,
+        margin={"b": 120},
+    )
+    _add_player(fig, frame_list, duration=50)
+    save_figure(fig, output / "tree", frame=-1, height=880)
 
 
 # -- main -------------------------------------------------------------------------
