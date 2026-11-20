@@ -68,3 +68,26 @@ def test_unconverged_solves_and_invalid_options_raise():
         BoundaryIntegralElectrodes(conductors, solver="gmres", period=10.0)
     with pytest.raises(ValueError, match="tolerance"):
         BoundaryIntegralElectrodes(conductors, tolerance=0.0)
+
+
+def test_tree_probes_match_the_direct_sum(monkeypatch):
+    conductors = _geometry(0.03)
+    electrodes = BoundaryIntegralElectrodes(conductors, k_e=1.0)
+    rng = np.random.default_rng(2)
+    sources = rng.uniform(-0.5, 0.5, (2, 300)) + [[4.0], [0.0]]
+    charges = rng.normal(size=300)
+    electrodes.solve(sources, charges)
+    points = rng.uniform(-3.0, 4.0, (2, 2000))
+    direct = electrodes.probe(points)
+    monkeypatch.setattr(electrodes_module, "TREE_PAIRS", 0)
+    tree = electrodes.probe(points)
+    assert len(electrodes._trees) == 1  # the panels' tree, kept for the next probe
+    for a, b in zip(tree, direct):
+        assert np.abs(a - b).max() < 1e-11 * np.abs(b).max()
+    # a second solve recharges the kept tree
+    electrodes.solve(sources, -charges)
+    again = electrodes.probe(points)
+    monkeypatch.setattr(electrodes_module, "TREE_PAIRS", 10**18)
+    reference = electrodes.probe(points)
+    for a, b in zip(again, reference):
+        assert np.abs(a - b).max() < 1e-11 * np.abs(b).max()

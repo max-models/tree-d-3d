@@ -59,6 +59,8 @@ NEAR_FIELD: float = 4.0
 FAR_POINTS: int = 2
 #: Above this many panels ``solver="auto"`` iterates (GMRES with the FMM) instead of LU.
 DIRECT_LIMIT: int = 3000
+#: Above this many target-source pairs a free-space sum walks a multipole tree.
+TREE_PAIRS: int = 4_000_000
 
 
 def _segment_rules() -> dict:
@@ -236,21 +238,6 @@ def periodic_log_kernel(d, period: float) -> tuple[np.ndarray, np.ndarray]:
         ex = np.where(large, np.sign(a) * (1.0 - e * e) / tail, np.sinh(near_a) / c)
         ey = np.where(large, 2.0 * np.sin(b) * e / tail, np.sin(b) / c)
     return phi, k * np.stack((ex, ey))
-
-
-def _in_loop(points: np.ndarray, vertices: np.ndarray) -> np.ndarray:
-    """Even-odd test of ``(2, M)`` points against the closed loop ``vertices`` ``(2, n)``."""
-    x, y = points
-    inside = np.zeros(x.size, dtype=bool)
-    xa, ya = vertices
-    xb, yb = np.roll(xa, -1), np.roll(ya, -1)
-    for x0, y0, x1, y1 in zip(xa, ya, xb, yb):
-        if y0 == y1:
-            continue
-        straddles = (y0 > y) != (y1 > y)
-        crossing = x0 + (y - y0) * (x1 - x0) / (y1 - y0)
-        inside ^= straddles & (x < crossing)
-    return inside
 
 
 class _Operator(LinearOperator):
@@ -726,10 +713,28 @@ class BoundaryIntegralElectrodes:
         if np.any(offset > tolerance) and np.any(offset < -tolerance):
             raise ValueError("the conductors must all lie on one side of the face")
 
+    def _loop_polygon(self, conductor: Conductor):
+        """The even-odd test of a closed conductor's loop, by simgeometry's compiled kernel."""
+        cache = self.__dict__.setdefault("_polygons", {})
+        test = cache.get(id(conductor))
+        if test is None:
+            from simgeometry import Polygon
+
+            polygon = Polygon(
+                vertices=[tuple(v) for v in np.asarray(conductor.vertices, float).T]
+            )
+
+            def test(points, polygon=polygon):
+                return np.asarray(polygon.contains_points(points), dtype=bool)
+
+            cache[id(conductor)] = test
+        return test
+
     def _loop_holds(self, conductor: Conductor, points: np.ndarray) -> np.ndarray:
         """Mask of the ``(2, M)`` points inside a closed conductor's loop, over the periods."""
         vertices = np.asarray(conductor.vertices, dtype=float)
         low, high = vertices[1].min(), vertices[1].max()
+        left, right = vertices[0].min(), vertices[0].max()
         held = np.zeros(points.shape[1], dtype=bool)
         if not points.shape[1]:
             return held
@@ -741,11 +746,15 @@ class BoundaryIntegralElectrodes:
             shifts = np.arange(first, last + 1) * self.period
         for shift in shifts:
             candidates = np.flatnonzero(
-                ~held & (points[1] - shift >= low) & (points[1] - shift <= high)
+                ~held
+                & (points[1] - shift >= low)
+                & (points[1] - shift <= high)
+                & (points[0] >= left)
+                & (points[0] <= right)
             )
             if candidates.size:
                 shifted = points[:, candidates] - np.array([[0.0], [shift]])
-                held[candidates[_in_loop(shifted, vertices)]] = True
+                held[candidates[self._loop_polygon(conductor)(shifted)]] = True
         return held
 
     def _prepare_iterative(self) -> None:
@@ -906,6 +915,8 @@ class BoundaryIntegralElectrodes:
         self.tolerance = float(tolerance)
         self.fmm_order = int(fmm_order)
         self.max_iterations = int(max_iterations)
+        # multipole trees over sources that never move (the panels' nodes), by key
+        self._trees: dict = {}
         #: GMRES iterations of the last `solve` (0 for the direct solver)
         self.iterations = 0
         with sp.region("tree_d_3d.electrodes.factorize", tags=_PROFILE_TAGS):
@@ -937,6 +948,33 @@ class BoundaryIntegralElectrodes:
             field[:, block] = pair_field @ charges
         return phi, field
 
+    def _tree_sum(self, points, sources, charges, exclude, key):
+        """A large free-space sum by a Barnes-Hut walk with ``fmm_order`` log expansions.
+
+        The tree over sources that never move (the panels' nodes, ``key``) is built
+        once and only recharged; others are built for the call. At ``theta`` = 0.5 and
+        the default order 24 the error is about 1e-14 of the field.
+        """
+        tree = self._trees.get(key) if key is not None else None
+        if tree is None:
+            low, high = sources.min(axis=1), sources.max(axis=1)
+            centre = 0.5 * (low + high)
+            half = 0.5 * float(np.max(high - low)) * (1.0 + 1e-9) + 1e-300
+            tree = FlatQuadtree(
+                sources,
+                charges,
+                Quad(float(centre[0]), float(centre[1]), half),
+                kernel="log",
+                order=self.fmm_order,
+                leaf_capacity=32,
+            )
+            if key is not None:
+                self._trees[key] = tree
+        else:
+            tree.set_charges(charges)
+        phi, field = tree.evaluate(points, exclude=exclude, theta=0.5)
+        return np.array(phi), np.array(field)
+
     def _far_sum(
         self,
         points: np.ndarray,
@@ -944,10 +982,13 @@ class BoundaryIntegralElectrodes:
         charges: np.ndarray,
         image: int,
         exclude: np.ndarray | None = None,
+        key=None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Raw potential and field at ``points`` of one image of point line charges.
 
-        Free space: `tree_d_3d.direct_field`, skipping ``exclude``; with a period,
+        Free space: `tree_d_3d.direct_field`, skipping ``exclude``, or above
+        `TREE_PAIRS` pairs a multipole tree (`_tree_sum`; ``key`` names sources that
+        never move, whose tree is kept); with a period,
         `periodic_log_kernel` summed in chunks, where a target on a source keeps
         only the other periods (the remainder, zero there).
         """
@@ -955,6 +996,8 @@ class BoundaryIntegralElectrodes:
         if image and self.face is not None:
             sources = self.face.mirror(sources)
         if self.period is None:
+            if points.shape[1] * sources.shape[1] > TREE_PAIRS:
+                return self._tree_sum(points, sources, sign * charges, exclude, key)
             phi, field = direct_field(
                 points, sources, sign * charges, kernel="log", exclude=exclude
             )
@@ -1036,7 +1079,9 @@ class BoundaryIntegralElectrodes:
         e = np.zeros((2, m))
         for image in range(len(self._image_signs)):
             exclude = None if self.period else self._node_exclude(points, image)
-            p, f = self._far_sum(points, self._nodes, node_charge, image, exclude)
+            p, f = self._far_sum(
+                points, self._nodes, node_charge, image, exclude, key=("nodes", image)
+            )
             phi += p
             e += f
         target, panel, image, shift = self._near_pairs(points)
