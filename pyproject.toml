@@ -39,7 +39,7 @@ optional-dependencies.dev = [
   "tree-d-3d[test,docs,examples]",
 ]
 optional-dependencies.examples = [
-  "plasma-plots[plotly]>=0.3",
+  "plasma-plots[plotly,web]>=0.3",
   "plasmacoll>=0.2.0",
 ]
 optional-dependencies.docs = [

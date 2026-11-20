@@ -4803,7 +4803,7 @@ docs = [
     { name = "plasmacoll" },
 ]
 examples = [
-    { name = "plasma-plots", extra = ["plotly"] },
+    { name = "plasma-plots", extra = ["plotly", "web"] },
     { name = "plasmacoll" },
 ]
 gpu = [
@@ -4814,7 +4814,7 @@ metal = [
 ]
 test = [
     { name = "methodcard", extra = ["symbolic"] },
-    { name = "plasma-plots", extra = ["plotly"] },
+    { name = "plasma-plots", extra = ["plotly", "web"] },
     { name = "plasmacoll" },
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -4834,8 +4834,8 @@ requires-dist = [
     { name = "nbclient", marker = "extra == 'docs'", specifier = ">=0.10" },
     { name = "nbformat", marker = "extra == 'docs'", specifier = ">=5.10" },
     { name = "numpy" },
-    { name = "plasma-plots", extras = ["plotly"], marker = "extra == 'examples'", git = "https://github.com/max-models/plasma-plots?branch=devel" },
     { name = "plasma-plots", extras = ["plotly", "web"], marker = "extra == 'docs'", git = "https://github.com/max-models/plasma-plots?branch=devel" },
+    { name = "plasma-plots", extras = ["plotly", "web"], marker = "extra == 'examples'", git = "https://github.com/max-models/plasma-plots?branch=devel" },
     { name = "plasmacoll", marker = "extra == 'examples'", git = "https://github.com/max-models/plasmacoll?branch=devel" },
     { name = "pre-commit", marker = "extra == 'dev'" },
     { name = "pyccel", specifier = ">2.0" },
