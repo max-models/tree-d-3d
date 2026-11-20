@@ -171,7 +171,7 @@ def plot_tree_boxes(output: Path, n: int = 3000) -> None:
         title=f"N = {n} random charges, leaf capacity 8",
         backend="plotly",
     )
-    save_figure(result, output / "tree_boxes")
+    save_figure(result, output / "tree_boxes", width=640, height=640)
 
 
 # -- 2: opening criterion ---------------------------------------------------------------
@@ -189,7 +189,7 @@ def plot_opening_criterion(output: Path, n: int = 800, theta: float = 0.5) -> No
         color=None,
         backend="plotly",
     )
-    save_figure(result, output / "opening_criterion")
+    save_figure(result, output / "opening_criterion", width=640, height=640)
 
 
 # -- 3: theta tradeoff -------------------------------------------------------------------
