@@ -434,11 +434,13 @@ class FlatQuadtree:
     def _build(self, root_quad: Quad) -> int:
         """Split the nodes level by level; returns the node count.
 
-        Every level is one ``quadtree_quadrants`` and one ``quadtree_scatter``
-        launch over the particles with prefix sums in between, so the nodes are
-        numbered breadth first and each node's particles keep their input order,
-        as in a serial build. ``self.levels[d]:self.levels[d + 1]`` are the nodes
-        at depth ``d``.
+        On the GPU every level is one ``quadtree_quadrants`` and one
+        ``quadtree_scatter`` launch over the particles with prefix sums in between;
+        on the CPU one ``quadtree_split`` call counts, ranges and partitions the
+        particles in two passes, without the ``(N, 4)`` prefix sums. Either way the
+        nodes are numbered breadth first and each node's particles keep their input
+        order, as in a serial build. ``self.levels[d]:self.levels[d + 1]`` are the
+        nodes at depth ``d``.
         """
         x, k = self._xp, self._kernels
         n = self.pos.shape[1]
@@ -459,7 +461,12 @@ class FlatQuadtree:
         slot_node = x.zeros(n, dtype=np.int64)
         new_perm = x.empty(n, dtype=np.int64)
         new_slot_node = x.empty(n, dtype=np.int64)
+        host = isinstance(self.pos, np.ndarray)  # the CPU (NumPy arrays), not CuPy
         quadrant = x.empty(n, dtype=np.int64)
+        cursor = x.zeros(capacity, dtype=np.int64) if host else None
+        # the positions in slot order, so that the CPU split reads them in order
+        sorted_pos = np.array(self.pos, dtype=float, copy=True) if host else None
+        new_sorted_pos = np.empty_like(sorted_pos) if host else None
         quadrants = x.arange(4)
         x_sign = x.asarray([-1.0, 1.0, -1.0, 1.0])
         y_sign = x.asarray([1.0, 1.0, -1.0, -1.0])
@@ -482,22 +489,13 @@ class FlatQuadtree:
                     new = x.empty((capacity, *old.shape[1:]), dtype=old.dtype)
                     new[:hi] = old[:hi]
                     setattr(self, name, new)
+                if host:
+                    cursor = x.zeros(capacity, dtype=np.int64)
             rank = x.cumsum(split, dtype=np.int64) - split
             self.node_child[lo:hi] = x.where(split, hi + 4 * rank, -1)
-            k.quadtree_quadrants(
-                self.pos, perm, slot_node, self.node_center, self.node_child, quadrant
-            )
-            # below[k, q]: slots up to k in quadrant q
-            below = x.cumsum(quadrant[:, None] == quadrants, axis=0, dtype=np.int64)
             parents = lo + x.flatnonzero(split)
-            start = self.node_start[parents]
-            before = below[x.maximum(start - 1, 0)] * (start > 0)[:, None]
-            in_child = below[self.node_end[parents] - 1] - before
-            child_start = start[:, None] + x.cumsum(in_child, axis=1) - in_child
             children = self.node_child[parents][:, None] + quadrants
             half = 0.5 * self.node_half[parents][:, None]
-            self.node_start[children] = child_start
-            self.node_end[children] = child_start + in_child
             self.node_half[children] = half
             self.node_depth[children] = self.node_depth[parents][:, None] + 1
             self.node_center[children, 0] = (
@@ -506,6 +504,41 @@ class FlatQuadtree:
             self.node_center[children, 1] = (
                 self.node_center[parents, 1][:, None] + y_sign * half
             )
+            if host:
+                assert cursor is not None and sorted_pos is not None
+                cursor[hi:count] = 0
+                k.quadtree_split(
+                    sorted_pos,
+                    perm,
+                    slot_node,
+                    self.node_center,
+                    self.node_child,
+                    self.node_start,
+                    self.node_end,
+                    np.int64(lo),
+                    np.int64(hi),
+                    cursor,
+                    quadrant,
+                    new_sorted_pos,
+                    new_perm,
+                    new_slot_node,
+                )
+                sorted_pos, new_sorted_pos = new_sorted_pos, sorted_pos
+                perm, new_perm = new_perm, perm
+                slot_node, new_slot_node = new_slot_node, slot_node
+                levels.append(count)
+                continue
+            k.quadtree_quadrants(
+                self.pos, perm, slot_node, self.node_center, self.node_child, quadrant
+            )
+            # below[k, q]: slots up to k in quadrant q
+            below = x.cumsum(quadrant[:, None] == quadrants, axis=0, dtype=np.int64)
+            start = self.node_start[parents]
+            before = below[x.maximum(start - 1, 0)] * (start > 0)[:, None]
+            in_child = below[self.node_end[parents] - 1] - before
+            child_start = start[:, None] + x.cumsum(in_child, axis=1) - in_child
+            self.node_start[children] = child_start
+            self.node_end[children] = child_start + in_child
             k.quadtree_scatter(
                 perm,
                 slot_node,
