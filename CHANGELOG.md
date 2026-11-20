@@ -5,6 +5,8 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-20
+
 ### Changed
 
 - The kernels are built with cunumpy's `KernelPackage` (`tree_d_3d.kernels.KERNEL_PACKAGE`):
@@ -68,10 +70,25 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   shapes through their `crossings`. `AbsorbedParticles.charges()` gives the charge collected
   by each wall and object. The ion-extraction example uses the swept test for its plate hits
   instead of its own mid-plane check.
+- `BoundaryIntegralElectrodes(period=...)`: geometries periodic along y, through the closed-form
+  row of line charges `periodic_log_kernel` (with a method card); the panel copies near a target
+  still enter exactly. `Face(axis, position, kind, potential)` and `face=`: a Neumann or
+  Dirichlet domain face by mirror images, combinable with the period; free charges get their
+  images too, and `force_on_sources` includes them.
+- Touching conductors at one potential act as their union: panel pairs on a shared edge, also
+  across the period seam, are dropped (`num_shared_panels`) instead of making the system singular.
+- `BoundaryIntegralElectrodes.inside` (the solid conductor holding a point; loops around other
+  conductors or free charges are shells), exact potential and zero field from `probe` inside a
+  solid conductor, and `surface_field()` (the normal field `4 pi k_e sigma` just outside each
+  panel).
+- `solver="gmres"` (and `"auto"` above `DIRECT_LIMIT` panels): GMRES with fast multipole products
+  and a self-term preconditioner, so tens of thousands of panels solve without a dense matrix.
+- Notebooks "Periodic electrodes", "Fast panel solves", "Absorbing objects" and "Kernels".
 
 ### Changed
 
-- simgeometry comes from PyPI (`simgeometry>=0.1.0`) instead of git.
+- simgeometry comes from PyPI (`simgeometry>=0.2.1`, for the swept polygon kernel) instead of
+  git; cunumpy at least 0.7.2.
 
 - `BoundaryIntegralElectrodes` LU-factorises its panel matrix once; each `solve()` reuses it.
 - The test extra installs the examples extra, so CI runs every example test.
@@ -90,6 +107,7 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `ReferenceQuadtree.field_at` (an `exclude` away from the probe makes the sum exact) say what
   the code does.
 
+- For an odd `far_points` the middle Gauss node is exactly the panel midpoint.
 - `conductors_from_shape` keeps an open curve (a simgeometry `Polyline`) an open conductor
   instead of closing it.
 - The einzel-lens example no longer claims round einzel lenses focus equally for both
