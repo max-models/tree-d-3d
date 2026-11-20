@@ -382,6 +382,11 @@ def _log_ticks(values: np.ndarray) -> dict:
     return {"tickvals": ticks, "exponentformat": "power"}
 
 
+def _face_axis_title(face: str) -> str:
+    """Return the x-axis title of a panel of the accel grid face ``face``."""
+    return "axial position x (mm)" if face == "barrel" else "distance from axis (mm)"
+
+
 def add_plates(fig: go.Figure, shapes) -> None:
     """Draw the grids and the boundary plates as filled outlines."""
     for name, shape in shapes.items():
@@ -568,7 +573,7 @@ def main(argv: list[str] | None = None) -> Path:
     )
 
     fig = make_subplots(
-        rows=3, cols=1, subplot_titles=list(faces), vertical_spacing=0.1
+        rows=3, cols=1, subplot_titles=list(faces), vertical_spacing=0.16
     )
     for row, (name, (bins, j)) in enumerate(current_density.items(), start=1):
         centres = 0.5 * (bins[1:] + bins[:-1])
@@ -578,21 +583,22 @@ def main(argv: list[str] | None = None) -> Path:
             col=1,
         )
         fig.update_xaxes(
-            title_text="x (mm)" if name == "barrel" else "distance from axis (mm)",
+            title_text=_face_axis_title(name),
+            tickangle=0,
+            nticks=5,
             row=row,
             col=1,
         )
-        fig.update_yaxes(
-            title_text="$j_\\mathrm{CEX}\\ (\\mathrm{A/m^2})$", row=row, col=1
-        )
-    fig.update_layout(title="Where the slow ions hit the accel grid", height=1140)
-    save_figure(fig, output / "impact_map")
+    # one shared y title, on the middle panel
+    fig.update_yaxes(title_text="$j_\\mathrm{CEX}\\ (\\mathrm{A/m^2})$", row=2, col=1)
+    fig.update_layout(title="Where the slow ions hit the accel grid", height=1200)
+    save_figure(fig, output / "impact_map", width=600, height=1200)
 
     fig = make_subplots(
         rows=2,
         cols=1,
         subplot_titles=("impact energy", "angle of incidence"),
-        vertical_spacing=0.15,
+        vertical_spacing=0.18,
     )
     for row, (values, bins, label) in enumerate(
         (
@@ -613,17 +619,18 @@ def main(argv: list[str] | None = None) -> Path:
             row=row,
             col=1,
         )
-        fig.update_xaxes(title_text=label, row=row, col=1)
-        fig.update_yaxes(title_text="fraction of the flux", row=row, col=1)
+        fig.update_xaxes(title_text=label, tickangle=0, nticks=5, row=row, col=1)
+    # one shared y title: both panels show the same quantity
+    fig.update_yaxes(title_text="fraction of the flux", row=1, col=1)
     fig.update_layout(
-        title="Impacts of charge-exchange ions on the accel grid", height=760
+        title="Impacts of charge-exchange ions on the accel grid", height=800
     )
-    save_figure(fig, output / "impact_distributions")
+    save_figure(fig, output / "impact_distributions", width=600, height=800)
     mean_energy = np.sum(w_accel * energy) / max(w_accel.sum(), 1e-300)
     print(f"mean impact energy on the accel grid: {mean_energy:.0f} eV")
 
     fig = make_subplots(
-        rows=3, cols=1, subplot_titles=list(erosion), vertical_spacing=0.1
+        rows=3, cols=1, subplot_titles=list(erosion), vertical_spacing=0.16
     )
     for row, (name, (bins, rate)) in enumerate(erosion.items(), start=1):
         centres = 0.5 * (bins[1:] + bins[:-1])
@@ -639,15 +646,18 @@ def main(argv: list[str] | None = None) -> Path:
             col=1,
         )
         fig.update_xaxes(
-            title_text="x (mm)" if name == "barrel" else "distance from axis (mm)",
+            title_text=_face_axis_title(name),
+            tickangle=0,
+            nticks=5,
             row=row,
             col=1,
         )
-        fig.update_yaxes(title_text="erosion (µm / 1000 h)", row=row, col=1)
+    # one shared y title, on the middle panel
+    fig.update_yaxes(title_text="erosion (µm per 1000 h)", row=2, col=1)
     fig.update_layout(
-        title="Estimated sputter erosion of the accel grid's faces", height=1140
+        title="Estimated sputter erosion of the accel grid's faces", height=1200
     )
-    save_figure(fig, output / "erosion")
+    save_figure(fig, output / "erosion", width=600, height=1200)
     peaks = {
         name: (0.5 * (b[1:] + b[:-1]))[np.argmax(r)] if r.max() > 0 else np.nan
         for name, (b, r) in erosion.items()

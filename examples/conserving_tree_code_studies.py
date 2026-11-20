@@ -94,12 +94,14 @@ def _box_shapes(tree, **kw) -> list[dict]:
 
 
 def _log_ticks(values) -> dict:
-    """Ticks for a log axis over ``values``: decades only, or 1-2-5 for a short span."""
+    """Ticks for a log axis over ``values``: 1-2-5 for a short span, else every 1-3 decades."""
     values = np.asarray(values, dtype=float)
     values = values[np.isfinite(values) & (values > 0)]
     lo, hi = float(values.min()), float(values.max())
-    if np.log10(hi / lo) >= 2:
-        return {"dtick": 1, "exponentformat": "power"}
+    span = np.log10(hi / lo)
+    if span >= 2:
+        step = 1 if span <= 6 else 2 if span <= 12 else 3
+        return {"dtick": step, "exponentformat": "power"}
     ticks = [
         m * 10.0**e
         for e in range(int(np.floor(np.log10(lo))), int(np.ceil(np.log10(hi))) + 1)
@@ -410,10 +412,10 @@ def plot_band_study(output: Path, quick: bool) -> None:
         rows=3,
         cols=1,
         shared_xaxes=True,
-        vertical_spacing=0.08,
+        vertical_spacing=0.07,
         subplot_titles=(
             "field accuracy",
-            "cost: memberships per particle",
+            "memberships per particle",
             "energy conservation",
         ),
     )
@@ -473,8 +475,17 @@ def plot_band_study(output: Path, quick: bool) -> None:
         **_log_ticks([*drifts, reference]),
     )
     fig.update_xaxes(title_text="$\\delta / h_\\mathrm{min}$", row=3, col=1)
-    fig.update_layout(title="Band width: accuracy, cost and energy error", height=1140)
-    save_figure(fig, output / "band_study")
+    fig.update_xaxes(nticks=5, tickangle=0)
+    # width and height set the aspect ratio of the web figure; the one legend entry goes
+    # below the plot instead of taking its right side
+    fig.update_layout(
+        title="Band width: accuracy, cost and energy error",
+        legend={"orientation": "h", "x": 0, "y": -0.08, "yanchor": "top"},
+        width=600,
+        height=1200,
+        margin={"b": 90},
+    )
+    save_figure(fig, output / "band_study", width=600, height=1200)
 
 
 # -- 4: cost at matched accuracy -----------------------------------------------------
@@ -514,7 +525,7 @@ def plot_cost_matched(output: Path, quick: bool) -> None:
     fig = make_subplots(
         rows=2,
         cols=1,
-        vertical_spacing=0.15,
+        vertical_spacing=0.17,
         subplot_titles=(
             "cheapest work at matched accuracy",
             "$\\text{every } (\\theta, p) \\text{ combination}$",
@@ -577,11 +588,15 @@ def plot_cost_matched(output: Path, quick: bool) -> None:
     fig.update_yaxes(
         type="log", title_text="work (model units)", row=2, col=1, **_log_ticks(work)
     )
+    fig.update_xaxes(tickangle=0)
     fig.update_layout(
         title="Exact momentum (triangle) costs about the same as the rectangle",
-        height=800,
+        legend={"orientation": "h", "x": 0, "y": -0.1, "yanchor": "top"},
+        width=600,
+        height=1000,
+        margin={"b": 90},
     )
-    save_figure(fig, output / "cost_matched")
+    save_figure(fig, output / "cost_matched", width=600, height=1000)
 
 
 # -- 5: long run ---------------------------------------------------------------------
@@ -655,15 +670,13 @@ def plot_error_map(output: Path, quick: bool) -> None:
     pos, q = cloud(600 if quick else 1000, seed=8)
     tree = BoxTree(pos, Quad(0, 0, 1), leaf_capacity=8)
     _, ref = direct_fields(pos, q)
-    fig = make_subplots(
-        rows=2, cols=1, subplot_titles=(" ", " "), vertical_spacing=0.12
-    )
+    fig = make_subplots(rows=2, cols=1, subplot_titles=(" ", " "), vertical_spacing=0.1)
     vmin, vmax = 1e-9, 1e-4
     ticks = np.linspace(np.log10(vmin), np.log10(vmax), 6)
     shapes: list[dict] = []
     for row, frac, title in (
         (1, 0.0, "hard membership"),
-        (2, 0.5, "smooth, δ = 0.5 h_min"),
+        (2, 0.5, "smooth, δ = 0.5 hₘᵢₙ"),
     ):
         f = SmoothFMM(tree, pos, q, order=8, theta=0.6, band=frac * tree.min_leaf_half)
         _, e = f.fields()
@@ -719,6 +732,8 @@ def plot_error_map(output: Path, quick: bool) -> None:
             constrain="domain",
             showgrid=False,
             zeroline=False,
+            nticks=5,
+            tickangle=0,
             row=row,
             col=1,
         )
@@ -733,10 +748,12 @@ def plot_error_map(output: Path, quick: bool) -> None:
     fig.update_layout(
         shapes=shapes,
         title="Smooth membership leaves the error distribution unchanged",
-        height=900,
+        width=550,
+        height=1100,
         margin={"b": 110},
     )
-    save_figure(fig, output / "error_map")
+    # width and height set the aspect ratio of the web figure: the square maps fill a phone
+    save_figure(fig, output / "error_map", width=550, height=1100)
 
 
 # -- 7: correction term --------------------------------------------------------------

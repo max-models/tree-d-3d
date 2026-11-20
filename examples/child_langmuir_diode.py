@@ -313,10 +313,16 @@ def main(argv: list[str] | None = None) -> Path:
                 line={"color": color},
             )
         )
-    fig.add_hline(
-        y=1.0,
-        line={"dash": "dash", "color": "black"},
-        annotation_text="$J_\\mathrm{CL}$",
+    # the Child-Langmuir level as a legend entry: a label on the line would sit on the
+    # noisy traces
+    fig.add_trace(
+        go.Scatter(
+            x=[t[0] / TRANSIT, t[-1] / TRANSIT],
+            y=[1.0, 1.0],
+            mode="lines",
+            name="$\\text{Child-Langmuir } J_\\mathrm{CL}$",
+            line={"dash": "dash", "color": "black"},
+        )
     )
     fig.update_xaxes(title_text="time / transit time")
     fig.update_yaxes(title_text="$J / J_\\mathrm{CL}$", range=[-0.2, 3])
@@ -394,7 +400,7 @@ def main(argv: list[str] | None = None) -> Path:
     fig.update_layout(
         title="Potential and field along the gap at the emitter's centre", height=760
     )
-    save_figure(fig, output / "potential")
+    save_figure(fig, output / "potential", width=600, height=760)
 
     # 3. density profile
     bins = averages["bins"]
@@ -495,8 +501,10 @@ def main(argv: list[str] | None = None) -> Path:
                         y=pos[1],
                         mode="markers",
                         marker={"size": 2, "color": COLORS["C0"]},
+                        name="electrons",
                     )
                 ],
+                traces=[0],
                 name=f"{time:.2f}",
             )
         )
@@ -505,26 +513,25 @@ def main(argv: list[str] | None = None) -> Path:
         fig.add_shape(
             type="line", x0=-0.02, x1=0.0, y0=yc, y1=yc, line={"color": "black"}
         )
-    fig.add_shape(
-        type="line",
-        x0=0,
-        x1=0,
-        y0=-width / 2,
-        y1=width / 2,
-        line={"color": "black", "width": 3},
-    )
-    fig.add_shape(
-        type="line",
-        x0=GAP,
-        x1=GAP,
-        y0=-width / 2,
-        y1=width / 2,
-        line={"color": COLORS["C3"], "width": 3},
-    )
+    # the electrodes as (static) traces, so the legend names them
+    for name, x_el, color in (
+        ("cathode", 0.0, "black"),
+        ("anode", GAP, COLORS["C3"]),
+    ):
+        fig.add_trace(
+            go.Scatter(
+                x=[x_el, x_el],
+                y=[-width / 2, width / 2],
+                mode="lines",
+                name=name,
+                line={"color": color, "width": 3},
+            )
+        )
     fig.update_xaxes(title_text="$x / d$", range=[-0.05, GAP + 0.05])
     fig.update_yaxes(title_text="$y / d$", range=[-width / 2 - 0.1, width / 2 + 0.1])
     fig.update_layout(
         title="Electrons from vacuum to the steady flow",
+        legend={"itemsizing": "constant"},
         margin={"b": 120},
         updatemenus=[
             {

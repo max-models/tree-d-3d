@@ -18,7 +18,8 @@ from an FMM.
 2. ``cost``: force (residual) evaluations per step of the two implicit schemes against
    ``dt * omega_pe``, with the number of explicit steps the same ``dt`` covers; the
    scheme pays only where the evaluations per step fall below that line. Steps on which
-   the unpreconditioned Newton-Krylov solver did not converge are marked.
+   the unpreconditioned Newton-Krylov solver did not converge are counted next to the
+   points (above the discrete-gradient curve, below the midpoint curve).
 3. ``kinetic``: kinetic energy against time for the explicit reference and the
    discrete-gradient scheme at the three steps; what a step that does not resolve the
    plasma oscillation does to the dynamics.
@@ -217,15 +218,6 @@ def main(argv: list[str] | None = None) -> Path:
 
     # 1. energy
     fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=[r[0] for r in ref],
-            y=[r[1] / e0 - 1 for r in ref],
-            mode="lines",
-            line={"color": COLORS["C0"]},
-            name=r"$\text{explicit Verlet},\ \omega_{pe}\,\Delta t = 0.1$",
-        )
-    )
     for dg, color in ((False, COLORS["C1"]), (True, COLORS["C2"])):
         hist = results[0.5, dg][0]
         label = r"\text{discrete gradient}" if dg else r"\text{implicit midpoint}"
@@ -238,10 +230,20 @@ def main(argv: list[str] | None = None) -> Path:
                 name=rf"${label},\ \omega_{{pe}}\,\Delta t = 0.5$",
             )
         )
+    # drawn last, dashed and thick: it lies on the discrete-gradient curve at zero
+    fig.add_trace(
+        go.Scatter(
+            x=[r[0] for r in ref],
+            y=[r[1] / e0 - 1 for r in ref],
+            mode="lines",
+            line={"color": COLORS["C0"], "dash": "dash", "width": 3},
+            name=r"$\text{explicit Verlet},\ \omega_{pe}\,\Delta t = 0.1$",
+        )
+    )
     fig.update_xaxes(title_text="time")
     fig.update_yaxes(title_text="relative energy error", exponentformat="power")
     fig.update_layout(
-        title=rf"$\text{{Energy error}}\ (N = {n},\ \omega_{{pe}} = {wpe:.0f})$",
+        title=f"Energy error (N = {n}, ωₚₑ = {wpe:.0f})",
         legend={"font": {"size": 10}},
     )
     save_figure(fig, output / "energy")
@@ -251,10 +253,14 @@ def main(argv: list[str] | None = None) -> Path:
     for dg, color in ((False, COLORS["C1"]), (True, COLORS["C2"])):
         means = [np.mean(results[f, dg][1]) for f in factors]
         fails = [results[f, dg][2] for f in factors]
-        # the midpoint curve lies below: its labels go under it, the other's above;
-        # the last point's label leans left so that it is not clipped at the edge
-        side = "top" if dg else "bottom"
-        positions = [f"{side} center"] * (len(factors) - 1) + [f"{side} left"]
+        # the midpoint curve lies below: its labels go under it (to the right, off the
+        # steep segment), the other's above (to the left); the last point's label leans
+        # left so that it is not clipped at the edge. The labels are in the text colour:
+        # the page's palette does not reach a trace's text.
+        if dg:
+            positions = ["top left"] * len(factors)
+        else:
+            positions = ["bottom right"] * (len(factors) - 1) + ["bottom left"]
         fig.add_trace(
             go.Scatter(
                 x=factors,
@@ -262,7 +268,7 @@ def main(argv: list[str] | None = None) -> Path:
                 mode="lines+markers+text",
                 text=[f"{k} failed" if k else "" for k in fails],
                 textposition=positions,
-                textfont={"color": color},
+                textfont={"color": "black"},
                 line={"color": color},
                 name="discrete gradient" if dg else "implicit midpoint",
             )
@@ -282,7 +288,14 @@ def main(argv: list[str] | None = None) -> Path:
         tickvals=[0.5, 1, 2, 5, 10],
         range=[np.log10(0.4), np.log10(13)],
     )
-    fig.update_yaxes(type="log", dtick=1, title_text="force evaluations per step")
+    # head room above the highest point for its "failed" label
+    top = max(np.mean(results[f, dg][1]) for f in factors for dg in (False, True))
+    fig.update_yaxes(
+        type="log",
+        dtick=1,
+        range=[np.log10(3), np.log10(4 * top)],
+        title_text="force evaluations per step",
+    )
     fig.update_layout(
         title="Cost of Newton-Krylov without preconditioning",
         legend={"font": {"size": 10}},
@@ -314,7 +327,7 @@ def main(argv: list[str] | None = None) -> Path:
     fig.update_xaxes(title_text="time")
     fig.update_yaxes(title_text="kinetic energy")
     fig.update_layout(
-        title=r"$\text{Kinetic energy: steps that do not resolve }\omega_{pe}$",
+        title="Kinetic energy: steps that do not resolve ωₚₑ",
         legend={"font": {"size": 10}},
     )
     save_figure(fig, output / "kinetic")

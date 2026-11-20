@@ -319,7 +319,7 @@ def plot_theta_tradeoff(output: Path, n: int = 6000) -> None:
         type="log",
         dtick=1,
         exponentformat="power",
-        title_text="max relative field error",
+        title_text="max relative error",
         row=1,
         col=1,
     )
