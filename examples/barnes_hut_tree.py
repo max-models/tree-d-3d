@@ -5,11 +5,12 @@ The Barnes-Hut tree, and how a quadtree approximates distant charges.
 Runs the experiments behind ``FlatQuadtree.evaluate``, the library's Barnes-Hut tree
 walk for point and line charges, and saves one figure per claim:
 
-1. ``tree_boxes``: a cloud of random charges and the leaf boxes of the quadtree built
-   on them; boxes shrink where particles are dense and stay large where they are sparse.
-2. ``opening_criterion``: for one target particle, which boxes the tree accepts as a
-   single multipole (far enough), which it visits leaf by leaf (too close), and which
-   it merely opens on the way down.
+1. ``tree_boxes``: a cloud of random charges of both signs and the cells of the quadtree
+   built on them, colored by depth (``plasma_plots.plot_quadtree``): cells shrink where
+   particles are dense and stay large where they are sparse.
+2. ``opening_criterion``: for one target particle (the star), the cells the walk accepts
+   as single multipoles (far enough, orange) and the leaves it sums particle by particle
+   (too close, red); the other cells are opened on the way down.
 3. ``theta_tradeoff``: field error against the direct sum, and wall-clock time, both
    against the opening angle theta: smaller theta is more accurate and slower.
 4. ``scaling``: wall-clock time against N for the direct sum and the tree walk, on a
@@ -33,7 +34,7 @@ from pathlib import Path
 
 import numpy as np
 import plotly.graph_objects as go
-from plasma_plots import save_figure
+from plasma_plots import plot_quadtree, save_figure
 from plotly.subplots import make_subplots
 
 from tree_d_3d import FlatQuadtree, Quad, direct_field
@@ -160,129 +161,35 @@ def cloud(n: int, seed: int, box: float = 0.9) -> tuple[np.ndarray, np.ndarray]:
 
 
 def plot_tree_boxes(output: Path, n: int = 3000) -> None:
-    """Figure 1."""
+    """Figure 1: the cells of the tree, colored by depth, drawn by plasma-plots."""
     pos, q = cloud(n, seed=0)
     tree = FlatQuadtree(pos, q, Quad(0, 0, 1), leaf_capacity=8)
-    fig = go.Figure()
-    fig.update_layout(
-        shapes=_leaf_shapes(tree.collect_nodes(), color="rgb(160,160,160)", width=0.4)
+    result = plot_quadtree(
+        tree,
+        points=pos,
+        point_color=q,
+        title=f"N = {n} random charges, leaf capacity 8",
+        backend="plotly",
     )
-    fig.add_trace(
-        go.Scatter(
-            x=pos[0, q > 0],
-            y=pos[1, q > 0],
-            mode="markers",
-            marker={"size": 3, "color": MPL_COLORS["C3"]},
-            name="+",
-        )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=pos[0, q < 0],
-            y=pos[1, q < 0],
-            mode="markers",
-            marker={"size": 3, "color": MPL_COLORS["C0"]},
-            name="−",
-        )
-    )
-    fig.update_xaxes(range=[-1.05, 1.05], scaleanchor="y", showgrid=False)
-    fig.update_yaxes(range=[-1.05, 1.05], showgrid=False)
-    fig.update_layout(
-        title=f"The quadtree on N = {n} random charges: leaf capacity 8",
-        legend={"font": {"size": 10}},
-    )
-    save_figure(fig, output / "tree_boxes")
+    save_figure(result, output / "tree_boxes")
 
 
 # -- 2: opening criterion ---------------------------------------------------------------
 
 
-def _classify(tree: FlatQuadtree, target: np.ndarray, theta: float):
-    """Walk the tree as ``evaluate`` would for one target: accepted / leaf / internal nodes."""
-    accepted, leaves, internal = [], [], []
-
-    def walk(node) -> None:
-        quad = node.quad
-        if node.is_external():
-            leaves.append(node)
-            return
-        distance = float(np.hypot(target[0] - quad.xmid, target[1] - quad.ymid))
-        if not quad.contains(*target) and 2 * quad.half < theta * distance:
-            accepted.append(node)
-            return
-        internal.append(node)
-        for child in node.children:
-            if child is not None and child.count > 0:
-                walk(child)
-
-    walk(tree.root)
-    return accepted, leaves, internal
-
-
 def plot_opening_criterion(output: Path, n: int = 800, theta: float = 0.5) -> None:
-    """Figure 2."""
+    """Figure 2: the Barnes-Hut walk for one target, as ``FlatQuadtree.evaluate`` walks."""
     pos, q = cloud(n, seed=2)
     tree = FlatQuadtree(pos, q, Quad(0, 0, 1), leaf_capacity=8)
-    target = pos[:, 0]
-    accepted, leaves, internal = _classify(tree, target, theta)
-    shapes = (
-        [
-            _rect(node.quad.xmid, node.quad.ymid, node.quad.half, width=0.3)
-            for node in internal
-        ]
-        + [
-            _rect(
-                node.quad.xmid,
-                node.quad.ymid,
-                node.quad.half,
-                color=MPL_COLORS["C1"],
-                width=0.9,
-            )
-            for node in leaves
-        ]
-        + [
-            _rect(
-                node.quad.xmid,
-                node.quad.ymid,
-                node.quad.half,
-                color=MPL_COLORS["C2"],
-                width=0,
-                fillcolor=MPL_COLORS["C2"],
-                opacity=0.35,
-            )
-            for node in accepted
-        ]
+    result = plot_quadtree(
+        tree,
+        points=pos,
+        target=pos[:, 0],
+        theta=theta,
+        color=None,
+        backend="plotly",
     )
-    fig = go.Figure()
-    fig.update_layout(shapes=shapes)
-    fig.add_trace(
-        go.Scatter(
-            x=pos[0],
-            y=pos[1],
-            mode="markers",
-            marker={"size": 3, "color": "rgb(150,150,150)"},
-            showlegend=False,
-        )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=[target[0]],
-            y=[target[1]],
-            mode="markers",
-            marker={"size": 14, "symbol": "star", "color": "black"},
-            name="target",
-        )
-    )
-    fig.update_xaxes(range=[-1.05, 1.05], scaleanchor="y", showgrid=False)
-    fig.update_yaxes(range=[-1.05, 1.05], showgrid=False)
-    fig.update_layout(
-        title=(
-            f"θ = {theta}: {len(accepted)} boxes accepted (green), "
-            f"{len(leaves)} leaves visited (orange)"
-        ),
-        legend={"font": {"size": 10}},
-    )
-    save_figure(fig, output / "opening_criterion")
+    save_figure(result, output / "opening_criterion")
 
 
 # -- 3: theta tradeoff -------------------------------------------------------------------
