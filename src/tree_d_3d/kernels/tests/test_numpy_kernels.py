@@ -154,3 +154,51 @@ def test_traversal_reports_overflow_and_needed_sizes(system):
             counts,
         )
         np.testing.assert_array_equal(counts, [0, 0, 10, -1])
+
+
+@pytest.mark.parametrize("kernel", ["coulomb", "log"])
+@pytest.mark.parametrize("potential", [True, False])
+def test_evaluate_groups(system, kernel, potential):
+    """The vectorized tree walk against the Pyccel one, for sources and other targets."""
+    import cunumpy as xp
+
+    from tree_d_3d.flat_tree import FlatQuadtree
+    from tree_d_3d.quad import Quad
+
+    pos, charge = system
+    n = pos.shape[1]
+    others = np.random.default_rng(5).uniform(-1.0, 1.0, (2, 77))
+    exclude = np.arange(n, dtype=np.int64)
+    exclude[::5] = -1
+    results = []
+    for implementation in ("numpy", "pyccel"):
+        with (
+            xp.use_backend("numpy"),
+            xp.kernels.use_host_kernel_implementation(implementation),
+        ):
+            tree = FlatQuadtree(
+                pos, charge, Quad(0, 0, 1), kernel=kernel, leaf_capacity=4, order=6
+            )
+            options = {"theta": 0.6, "softening": 0.01, "potential": potential}
+            results.append(
+                tree.evaluate(pos, exclude=exclude, **options)
+                + tree.evaluate(others, **options)
+            )
+    for a, b in zip(*results):
+        np.testing.assert_allclose(a, b, rtol=1e-10, atol=1e-10)
+
+
+def test_evaluate_groups_flags_coincident_charges(system):
+    import cunumpy as xp
+
+    from tree_d_3d.flat_tree import FlatQuadtree
+    from tree_d_3d.quad import Quad
+
+    pos, charge = system
+    with (
+        xp.use_backend("numpy"),
+        xp.kernels.use_host_kernel_implementation("numpy"),
+    ):
+        tree = FlatQuadtree(pos, charge + 1.0, Quad(0, 0, 1))
+        with pytest.raises(ValueError):
+            tree.evaluate(pos[:, :3])
