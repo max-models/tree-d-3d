@@ -18,6 +18,7 @@ def evaluate_groups(
     exclude: "int64[:]",
     group_start: "int64[:]",
     log_kernel: int,
+    with_potential: int,
     spos: "float[:,:]",
     scharge: "float[:]",
     sindex: "int64[:]",
@@ -45,7 +46,8 @@ def evaluate_groups(
     indices in tree order (``perm``); ``exclude[i]`` is a source index skipped for
     target ``i``. ``log_kernel`` 0 is the Coulomb walk of ``evaluate_quadtree``
     (moments ``node_q``, ``node_p``, ``node_s``), 1 the line-charge walk of
-    ``evaluate_log_quadtree`` (``moment_re``, ``moment_im``). A target that meets an
+    ``evaluate_log_quadtree`` (``moment_re``, ``moment_im``); ``with_potential`` 0
+    skips the line-charge potential (its logarithms), leaving ``phi`` zero. A target that meets an
     unsoftened coincident charge gets ``phi = 1e300``.
     """
     eps2 = softening * softening
@@ -109,7 +111,8 @@ def evaluate_groups(
                                 cb = 0.0 if gskip[b] == sid else c
                                 r2 = 1.0 if gskip[b] == sid else r2
                                 bad[b] += 1 if r2 == 0.0 else 0
-                                pot[b] -= cb * log(r2)
+                                if with_potential != 0:
+                                    pot[b] -= cb * log(r2)
                                 ex[b] += 2.0 * cb * dx / r2
                                 ey[b] += 2.0 * cb * dy / r2
                         else:
@@ -145,7 +148,8 @@ def evaluate_groups(
                             bad[b] = 1
                             break
                         if log_kernel != 0:
-                            pot[b] -= c * log(r2)
+                            if with_potential != 0:
+                                pot[b] -= c * log(r2)
                             ex[b] += 2.0 * c * dx / r2
                             ey[b] += 2.0 * c * dy / r2
                         else:
@@ -235,12 +239,12 @@ def evaluate_groups(
                             next_re = cur_re * w_re - cur_im * w_im
                             cur_im = cur_re * w_im + cur_im * w_re
                             cur_re = next_re
-                        pot[b] += -moment_re[node, 0] * log(d2) + 2.0 * series
+                        if with_potential != 0:
+                            pot[b] += -moment_re[node, 0] * log(d2) + 2.0 * series
                         ex[b] += 2.0 * f_re
                         ey[b] -= 2.0 * f_im
                     else:
-                        distance = sqrt(rx * rx + ry * ry)
-                        inv_r = 1.0 / sqrt(distance * distance + eps2)
+                        inv_r = 1.0 / sqrt(rx * rx + ry * ry + eps2)
                         inv_r2 = inv_r * inv_r
                         inv_r3 = inv_r2 * inv_r
                         inv_r5 = inv_r3 * inv_r2

@@ -834,10 +834,11 @@ class FlatQuadtree:
     def _sorted_sources(self):
         """The sources' positions and charges in tree order (``perm``), kept until they change."""
         if self._sorted is None:
-            self._sorted = (
-                np.ascontiguousarray(self.pos[:, self.perm]),
-                np.ascontiguousarray(self.charge[self.perm]),
-            )
+            # one spare column, as Pyccel takes a (2, 1) array for a Fortran-ordered one
+            n = self.pos.shape[1]
+            spos = np.zeros((2, n + 1))
+            spos[:, :n] = self.pos[:, self.perm]
+            self._sorted = (spos, np.ascontiguousarray(self.charge[self.perm]))
         return self._sorted
 
     def _target_order(self, targets: np.ndarray) -> np.ndarray:
@@ -863,7 +864,9 @@ class FlatQuadtree:
             key |= v << np.uint64(shift)
         return np.argsort(key, kind="stable")
 
-    def _evaluate_groups(self, targets, exclude, theta, softening, phi, field, status):
+    def _evaluate_groups(
+        self, targets, exclude, theta, softening, potential, phi, field, status
+    ):
         """`evaluate` on the CPU: the walk of ``evaluate_groups`` by groups of targets.
 
         The groups are runs of nearby targets; each target gets the same terms as in its
@@ -874,13 +877,17 @@ class FlatQuadtree:
         spos, scharge = self._sorted_sources()
         log_kernel = self.kernel == "log"
         empty = np.zeros((1, 1))
+        # one spare column: Pyccel takes a (2, 1) array for a Fortran-ordered one
+        sorted_targets = np.empty((2, n_targets + 1))
+        sorted_targets[:, :n_targets] = targets[:, order]
         phi_sorted = np.empty(n_targets)
-        field_sorted = np.empty((2, n_targets))
+        field_sorted = np.empty((2, n_targets + 1))
         self._kernels.evaluate_groups(
-            np.ascontiguousarray(targets[:, order]),
+            sorted_targets,
             np.ascontiguousarray(exclude[order]),
             np.append(np.arange(0, n_targets, GROUP_SIZE), n_targets),
             1 if log_kernel else 0,
+            1 if potential else 0,
             spos,
             scharge,
             self.perm,
@@ -902,7 +909,7 @@ class FlatQuadtree:
             field_sorted,
         )
         phi[order] = phi_sorted
-        field[:, order] = field_sorted
+        field[:, order] = field_sorted[:, :n_targets]
         bad = np.flatnonzero(phi == 1.0e300)
         if bad.size:
             phi[bad[0]] = 0.0
@@ -931,10 +938,14 @@ class FlatQuadtree:
         problem=_walk_problem,
     )
     @sp.profile("tree_d_3d.flat_tree.evaluate", tags=_PROFILE_TAGS)
-    def evaluate(self, targets, *, exclude=None, theta=0.5, softening=0.0):
+    def evaluate(
+        self, targets, *, exclude=None, theta=0.5, softening=0.0, potential=True
+    ):
         """Potential ``(M,)`` and field ``(2, M)`` at ``targets`` ``(2, M)``, without ``k_e``.
 
         ``exclude[i]`` is a source index skipped for target ``i`` (-1: none).
+        ``potential=False`` returns the potential as zeros, which saves the logarithms
+        of the line-charge kernel when only the field is needed.
         """
         targets = _points(targets, "targets", compiled=self._compiled)
         n_targets = targets.shape[1]
@@ -947,9 +958,10 @@ class FlatQuadtree:
         n_sources = self.pos.shape[1]
         if isinstance(self.pos, np.ndarray) and n_sources and n_targets:
             self._evaluate_groups(
-                targets, exclude, theta, softening, phi, field, status
+                targets, exclude, theta, softening, potential, phi, field, status
             )
             _check(status)
+            return phi, field
         elif self.kernel == "log" and n_sources and n_targets:
             self._kernels.evaluate_log_quadtree(
                 targets,
@@ -997,6 +1009,8 @@ class FlatQuadtree:
                 status,
             )
             _check(status)
+        if not potential:
+            phi[...] = 0.0
         return phi, field
 
     def _traverse(self, theta: float):
@@ -1159,7 +1173,7 @@ class FlatQuadtree:
         if host and not distributed.is_parallel(self.comm):
             spos, scharge = self._sorted_sources()
             phi_sorted = np.zeros(n)
-            field_sorted = np.zeros((2, n))
+            field_sorted = np.zeros((2, n + 1))
             k.fmm_evaluate_host(
                 spos,
                 scharge,
@@ -1181,7 +1195,7 @@ class FlatQuadtree:
             if int(status[0]):
                 status[0] = self.perm[int(status[0]) - 1] + 1
             phi[self.perm] = phi_sorted
-            field[:, self.perm] = field_sorted
+            field[:, self.perm] = field_sorted[:, :n]
         elif not distributed.is_parallel(self.comm):
             k.fmm_evaluate(
                 self.pos,

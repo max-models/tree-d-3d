@@ -161,7 +161,9 @@ class Beam:
         v[0] = self.v[0]
 
         def accel(pos):
-            _, e = tree.evaluate(pos, theta=0.5, softening=self.softening)
+            _, e = tree.evaluate(
+                pos, theta=0.5, softening=self.softening, potential=False
+            )
             return K_E * np.asarray(e)
 
         for i in range(self.steps):
