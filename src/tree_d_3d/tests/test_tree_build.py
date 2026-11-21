@@ -1,11 +1,11 @@
-"""The CPU tree build (quadtree_split) gives the same tree as the reference build."""
+"""The CPU tree build (quadtree_build) gives the same tree as the GPU's level kernels."""
 
 import numpy as np
 import pytest
 
 from tree_d_3d import FlatQuadtree, Quad
-from tree_d_3d.kernels.quadtree_split.quadtree_split_numpy import (
-    quadtree_split as numpy_split,
+from tree_d_3d.kernels.quadtree_build.quadtree_build_numpy import (
+    quadtree_build as numpy_build,
 )
 
 ARRAYS = (
@@ -34,20 +34,26 @@ def _clouds():
 
 
 @pytest.mark.parametrize("name", list(_clouds()))
-def test_compiled_build_equals_the_uncompiled_one(name):
+@pytest.mark.parametrize("compiled", [True, False])
+def test_one_call_build_equals_the_level_kernels(name, compiled, monkeypatch):
+    import tree_d_3d.flat_tree as flat_tree
+
     pos = _clouds()[name]
     q = np.ones(pos.shape[1])
-    compiled = FlatQuadtree(pos, q, Quad(0, 0, 1), leaf_capacity=6)
-    plain = FlatQuadtree(pos, q, Quad(0, 0, 1), leaf_capacity=6, compiled=False)
+    built = FlatQuadtree(pos, q, Quad(0, 0, 1), leaf_capacity=6, compiled=compiled)
+    monkeypatch.setattr(flat_tree, "_HOST_BUILD", False)
+    levelled = FlatQuadtree(pos, q, Quad(0, 0, 1), leaf_capacity=6)
     for attribute in ARRAYS:
         np.testing.assert_array_equal(
-            getattr(compiled, attribute), getattr(plain, attribute)
+            getattr(built, attribute), getattr(levelled, attribute)
         )
-    # every particle once, every leaf holds what its range says
-    assert np.array_equal(np.sort(compiled.perm), np.arange(pos.shape[1]))
+    # every particle once, in tree order in the sorted positions
+    assert np.array_equal(np.sort(built.perm), np.arange(pos.shape[1]))
+    spos, _ = built._sorted_sources()
+    np.testing.assert_array_equal(spos[:, : pos.shape[1]], pos[:, built.perm])
 
 
-def test_the_numpy_split_equals_the_compiled_one(monkeypatch):
+def test_a_too_small_node_buffer_restarts_the_build(monkeypatch):
     import tree_d_3d.flat_tree as flat_tree
 
     pos = _clouds()["clustered"]
@@ -58,14 +64,21 @@ def test_the_numpy_split_equals_the_compiled_one(monkeypatch):
 
     def counted(*args):
         calls.append(1)
-        numpy_split(*args)
+        numpy_build(*args)
 
-    monkeypatch.setattr(kernels, "quadtree_split", counted)
+    original = FlatQuadtree._build_host
+    monkeypatch.setattr(kernels, "quadtree_build", counted)
     monkeypatch.setattr(flat_tree, "_kernels", lambda compiled=True: kernels)
-    numpy_tree = FlatQuadtree(pos, q, Quad(0, 0, 1), leaf_capacity=6)
+    monkeypatch.setattr(
+        FlatQuadtree,
+        "_build_host",
+        lambda self, root, capacity: original(self, root, 8),
+    )
+    small = FlatQuadtree(pos, q, Quad(0, 0, 1), leaf_capacity=6)
+    assert len(calls) > 1
     for attribute in ARRAYS:
         np.testing.assert_array_equal(
-            getattr(numpy_tree, attribute), getattr(expected, attribute)
+            getattr(small, attribute), getattr(expected, attribute)
         )
 
 

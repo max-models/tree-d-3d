@@ -302,6 +302,7 @@ class ElectrostaticSimulation:
             )
         self._electric = np.zeros((2, n))
         self._potential = np.zeros(n)
+        self._potential_done = False
         self._field_state = None
         self._sources = None
         self._fixed_fields_done = False
@@ -668,7 +669,7 @@ class ElectrostaticSimulation:
         return 2 * np.log(self.reference_radius) * others
 
     def _evaluate_targets(self, targets: np.ndarray) -> None:
-        """Fill the cached force and potential at ``targets``."""
+        """Fill the cached force and potential (if `_potential_done`) at ``targets``."""
         if self.k_e == 0 or not len(targets):
             return
         assert self._sources is not None  # set by compute_fields
@@ -679,6 +680,7 @@ class ElectrostaticSimulation:
                 exclude=offset + targets,
                 theta=self.theta,
                 softening=self.softening,
+                potential=self._potential_done,
             )
         else:
             phi, field = direct_field(
@@ -696,17 +698,30 @@ class ElectrostaticSimulation:
         self._electric[:, targets] = self.k_e * self.charges[None, targets] * field
 
     @sp.profile("tree_d_3d.simulation.compute_fields", tags=_PROFILE_TAGS)
-    def compute_fields(self, include_fixed: bool = True) -> FlatQuadtree | None:
+    def compute_fields(
+        self, include_fixed: bool = True, potential: bool = True
+    ) -> FlatQuadtree | None:
         """Electric force and potential on every particle, reusing a cache.
 
         Fixed particles never move, so stepping skips them as targets
         (``include_fixed=False``) and their force and potential stay zero
         until they are asked for; they always act as sources. A later call
         with ``include_fixed=True`` fills them in from the same tree.
+        ``potential=False`` may skip the potential where it costs extra (the
+        logarithms of the line-charge kernel's tree and FMM sums); a later call
+        with ``potential=True`` computes the fields again with it.
         Returns the tree used, or None for direct summation.
         """
         if len(self.bodies) != self.num_particles:
             self._adopt()
+        # the potential costs a logarithm per near pair of the log kernel's tree sums
+        want_potential = potential or self.kernel != "log"
+        if (
+            want_potential
+            and not self._potential_done
+            and self._field_state is not None
+        ):
+            self._field_state = None
         if self._fields_current():
             if include_fixed and not self._fixed_fields_done:
                 self._evaluate_targets(np.flatnonzero(self.charges * self.fixed))
@@ -719,6 +734,7 @@ class ElectrostaticSimulation:
         self._potential = np.zeros(n)
         self._tree = None
         method = self._resolve_method(self._sources[1])
+        self._potential_done = want_potential or method == "direct"
         if method in ("tree", "fmm"):
             self._tree = self._make_tree(self._sources)
         charged = self.charges != 0
@@ -727,11 +743,16 @@ class ElectrostaticSimulation:
             # several ranks they share its work and each keeps its own particles.
             if self.k_e != 0 and np.any(self._sources[1] != 0):
                 assert self._tree is not None
-                phi, field = self._tree.fmm(theta=self.theta, softening=self.softening)
+                phi, field = self._tree.fmm(
+                    theta=self.theta,
+                    softening=self.softening,
+                    potential=self._potential_done,
+                )
                 own = slice(self._sources[2], self._sources[2] + n)
                 phi, field = _host(phi)[own], _host(field)[:, own]
                 everyone = np.arange(n)
-                self._potential[:] = self.k_e * (phi + self._line_offset(everyone))
+                if self._potential_done:
+                    self._potential[:] = self.k_e * (phi + self._line_offset(everyone))
                 self._electric[:] = self.k_e * self.charges[None, :] * field
             self._fixed_fields_done = True
             self._field_state = (
@@ -778,7 +799,7 @@ class ElectrostaticSimulation:
         evaluated here and read as zero; call `compute_fields` for them.
         """
         self.dt = _finite("dt", self.dt if dt is None else dt, positive=True)
-        self.compute_fields(include_fixed=False)
+        self.compute_fields(include_fixed=False, potential=False)
         mobile = ~self.fixed
         inv_mass = 1 / self.masses[mobile]
         vel = self.velocities
@@ -795,7 +816,7 @@ class ElectrostaticSimulation:
         )
         vel[:, mobile] = np.stack((c * vx + s * vy, c * vy - s * vx))
         self._absorb(start)
-        tree = self.compute_fields(include_fixed=False)
+        tree = self.compute_fields(include_fixed=False, potential=False)
         vel = self.velocities
         mobile = ~self.fixed
         inv_mass = 1 / self.masses[mobile]
@@ -827,8 +848,11 @@ class ElectrostaticSimulation:
         """Pair energy for the force kernel, excluding self-energy.
 
         By default this is ``0.5 * sum(q_i * phi_i)`` from the field
-        evaluation used for the forces, at no extra cost: exact when the
-        fields are summed directly, and accurate to the tree error otherwise.
+        evaluation used for the forces: exact when the fields are summed
+        directly, and accurate to the tree error otherwise. It comes at no extra
+        cost, except for the line-charge kernel's tree and FMM sums, whose steps
+        skip the potential (its logarithms): there it costs one more field
+        evaluation per configuration.
         ``exact=True`` sums all pairs, which costs O(N squared).
         """
         if self.k_e == 0:

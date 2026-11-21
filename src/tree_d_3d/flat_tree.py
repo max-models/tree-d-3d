@@ -47,6 +47,15 @@ MAX_ORDER = 64
 
 _KERNELS = ("coulomb", "log")
 
+#: build the tree in one ``quadtree_build`` call on the CPU (off: the GPU's level kernels)
+_HOST_BUILD = True
+
+#: targets per group of the CPU walk (`FlatQuadtree.evaluate`), at most 62
+GROUP_SIZE = 32
+
+#: small tables shared by every tree (M2L matrices), by key
+_CACHE: dict = {}
+
 
 def _direct_rules() -> dict:
     """The SymPy rules of `direct_field`: one source, one target (for the tests)."""
@@ -202,6 +211,20 @@ def _binomial_table(size: int) -> np.ndarray:
         for col in range(1, row + 1):
             table[row, col] = table[row - 1, col - 1] + table[row - 1, col]
     return table
+
+
+def _m2l_coefficients(order: int, symmetric: bool) -> np.ndarray:
+    """The real M2L matrix of ``fmm_m2l_host``: ``coeff[k, l]``, see its docstring."""
+    binomial = _binomial_table(2 * order + 1)
+    coeff = np.zeros((order + 1, order + 1))
+    for m in range(1, order + 1):
+        coeff[0, m] = 1.0 / m
+    for k in range(1, order + 1):
+        coeff[k, 0] = 1.0 / k
+        for m in range(1, order + 1):
+            if k <= (order - m if symmetric else order):
+                coeff[k, m] = binomial[k + m - 1, m] / k
+    return coeff
 
 
 def _moment_rules() -> dict:
@@ -419,6 +442,7 @@ class FlatQuadtree:
     def _empty(self, root_quad: Quad) -> None:
         # Pyccel rejects zero-length arrays, so build the lone root here.
         self._traversals: dict = {}
+        self._sorted = None
         self.perm = self._xp.empty(0, dtype=np.int64)
         self.node_count = 1
         self.node_center = self._xp.array(
@@ -437,20 +461,70 @@ class FlatQuadtree:
         self.moment_re = self._xp.zeros((1, self.order + 1))
         self.moment_im = self._xp.zeros((1, self.order + 1))
 
+    def _build_host(self, root_quad: Quad, capacity: int) -> int:
+        """`_build` on the CPU: the whole build in one ``quadtree_build`` call."""
+        n = self.pos.shape[1]
+        int_scratch = [np.empty(n, dtype=np.int64) for _ in range(5)]
+        perm, slot_node, quadrant, new_perm, new_slot_node = int_scratch
+        # one spare column, as Pyccel takes a (2, 1) array for a Fortran-ordered one
+        new_sorted_pos = np.empty((2, n + 1))
+        sizes = np.zeros(3, dtype=np.int64)
+        while True:
+            sorted_pos = np.zeros((2, n + 1))
+            sorted_pos[:, :n] = self.pos
+            self.node_center = np.empty((capacity, 2))
+            self.node_half = np.empty(capacity)
+            self.node_start = np.empty(capacity, dtype=np.int64)
+            self.node_end = np.empty(capacity, dtype=np.int64)
+            self.node_child = np.empty(capacity, dtype=np.int64)
+            self.node_depth = np.empty(capacity, dtype=np.int64)
+            self.node_center[0] = (root_quad.xmid, root_quad.ymid)
+            self.node_half[0] = root_quad.half
+            levels = np.empty(capacity + 1, dtype=np.int64)
+            self._kernels.quadtree_build(
+                sorted_pos,
+                self.leaf_capacity,
+                self.max_depth,
+                self.node_center,
+                self.node_half,
+                self.node_start,
+                self.node_end,
+                self.node_child,
+                self.node_depth,
+                perm,
+                levels,
+                slot_node,
+                quadrant,
+                np.empty(capacity, dtype=np.int64),
+                new_sorted_pos,
+                new_perm,
+                new_slot_node,
+                sizes,
+            )
+            if not sizes[2]:
+                break
+            capacity *= 2
+        self.perm = perm
+        self.levels = levels[: sizes[1] + 1].copy()
+        # the build leaves the positions in tree order
+        self._sorted_pos = sorted_pos
+        return int(sizes[0])
+
     def _build(self, root_quad: Quad) -> int:
         """Split the nodes level by level; returns the node count.
 
-        On the GPU every level is one ``quadtree_quadrants`` and one
-        ``quadtree_scatter`` launch over the particles with prefix sums in between;
-        on the CPU one ``quadtree_split`` call counts, ranges and partitions the
-        particles in two passes, without the ``(N, 4)`` prefix sums. Either way the
-        nodes are numbered breadth first and each node's particles keep their input
-        order, as in a serial build. ``self.levels[d]:self.levels[d + 1]`` are the
-        nodes at depth ``d``.
+        On the CPU the whole build is one ``quadtree_build`` call (`_build_host`); on
+        the GPU (and with ``_HOST_BUILD`` off) every level is one ``quadtree_quadrants``
+        and one ``quadtree_scatter`` launch over the particles with prefix sums in
+        between. Either way the nodes are numbered breadth first and each node's
+        particles keep their input order, as in a serial build.
+        ``self.levels[d]:self.levels[d + 1]`` are the nodes at depth ``d``.
         """
         x, k = self._xp, self._kernels
         n = self.pos.shape[1]
         capacity = 4 * (2 * n // self.leaf_capacity + 16)
+        if _HOST_BUILD and isinstance(self.pos, np.ndarray):
+            return self._build_host(root_quad, capacity)
         self.node_center = x.empty((capacity, 2))
         self.node_half = x.empty(capacity)
         self.node_start = x.empty(capacity, dtype=np.int64)
@@ -467,12 +541,7 @@ class FlatQuadtree:
         slot_node = x.zeros(n, dtype=np.int64)
         new_perm = x.empty(n, dtype=np.int64)
         new_slot_node = x.empty(n, dtype=np.int64)
-        host = isinstance(self.pos, np.ndarray)  # the CPU (NumPy arrays), not CuPy
         quadrant = x.empty(n, dtype=np.int64)
-        cursor = x.zeros(capacity, dtype=np.int64) if host else None
-        # the positions in slot order, so that the CPU split reads them in order
-        sorted_pos = np.array(self.pos, dtype=float, copy=True) if host else None
-        new_sorted_pos = np.empty_like(sorted_pos) if host else None
         quadrants = x.arange(4)
         x_sign = x.asarray([-1.0, 1.0, -1.0, 1.0])
         y_sign = x.asarray([1.0, 1.0, -1.0, -1.0])
@@ -495,8 +564,6 @@ class FlatQuadtree:
                     new = x.empty((capacity, *old.shape[1:]), dtype=old.dtype)
                     new[:hi] = old[:hi]
                     setattr(self, name, new)
-                if host:
-                    cursor = x.zeros(capacity, dtype=np.int64)
             rank = x.cumsum(split, dtype=np.int64) - split
             self.node_child[lo:hi] = x.where(split, hi + 4 * rank, -1)
             parents = lo + x.flatnonzero(split)
@@ -510,30 +577,6 @@ class FlatQuadtree:
             self.node_center[children, 1] = (
                 self.node_center[parents, 1][:, None] + y_sign * half
             )
-            if host:
-                assert cursor is not None and sorted_pos is not None
-                cursor[hi:count] = 0
-                k.quadtree_split(
-                    sorted_pos,
-                    perm,
-                    slot_node,
-                    self.node_center,
-                    self.node_child,
-                    self.node_start,
-                    self.node_end,
-                    np.int64(lo),
-                    np.int64(hi),
-                    cursor,
-                    quadrant,
-                    new_sorted_pos,
-                    new_perm,
-                    new_slot_node,
-                )
-                sorted_pos, new_sorted_pos = new_sorted_pos, sorted_pos
-                perm, new_perm = new_perm, perm
-                slot_node, new_slot_node = new_slot_node, slot_node
-                levels.append(count)
-                continue
             k.quadtree_quadrants(
                 self.pos, perm, slot_node, self.node_center, self.node_child, quadrant
             )
@@ -591,6 +634,13 @@ class FlatQuadtree:
             out[...] = gathered[first : first + width].T.reshape(out.shape)
             first += width
 
+    def _binomial(self) -> np.ndarray:
+        """``C(n, k)`` for ``n, k <= 2 p``, as floats (shared by all trees)."""
+        key = ("binomial", self.order)
+        if key not in _CACHE:
+            _CACHE[key] = _binomial_table(2 * self.order + 1)
+        return _CACHE[key]
+
     def _moments(self) -> None:
         """The cells' charges and multipole moments from ``self.charge``.
 
@@ -608,11 +658,29 @@ class FlatQuadtree:
             self._stack = self._xp.empty(
                 3 * int(self.node_depth.max()) + 8, dtype=np.int64
             )
+            # on the CPU of one process: one upward pass (leaves, then M2M)
+            upward = isinstance(self.pos, np.ndarray) and not collectives.is_parallel(
+                self.comm
+            )
+            levels = np.asarray(self.levels, dtype=np.int64)
             if kernel == "log":
                 self.moment_re = self._xp.empty((count, self.order + 1))
                 self.moment_im = self._xp.empty((count, self.order + 1))
                 outputs = (self.node_qabs, self.moment_re, self.moment_im)
-                if share.stop > share.start:
+                if upward:
+                    self._kernels.log_moments_upward(
+                        self.pos,
+                        self.charge,
+                        self.perm,
+                        levels,
+                        self.node_center,
+                        self.node_start,
+                        self.node_end,
+                        self.node_child,
+                        self._binomial(),
+                        *outputs,
+                    )
+                elif share.stop > share.start:
                     self._kernels.log_quadtree_moments(
                         self.pos,
                         self.charge,
@@ -630,7 +698,19 @@ class FlatQuadtree:
                 self.node_p[:, 1] = self.moment_im[:, 1]
                 return
             outputs = (self.node_q, self.node_qabs, self.node_p, self.node_s)
-            if share.stop > share.start:
+            if upward:
+                self._kernels.quadtree_moments_upward(
+                    self.pos,
+                    self.charge,
+                    self.perm,
+                    levels,
+                    self.node_center,
+                    self.node_start,
+                    self.node_end,
+                    self.node_child,
+                    *outputs,
+                )
+            elif share.stop > share.start:
                 self._kernels.quadtree_moments(
                     self.pos,
                     self.charge,
@@ -703,7 +783,27 @@ class FlatQuadtree:
             for name in _NODE_ARRAYS:
                 setattr(self, name, getattr(self, name)[:count].copy())
         self._traversals: dict = {}
+        self._sorted = None
         self._moments()
+
+    def _m2l_coefficients(self) -> np.ndarray:
+        """The real M2L matrix of ``fmm_m2l_host`` for this order and truncation."""
+        key = ("m2l_coefficients", self.order, self.symmetric)
+        if key not in _CACHE:
+            _CACHE[key] = _m2l_coefficients(self.order, self.symmetric)
+        return _CACHE[key]
+
+    def _m2l_rows(self, theta: float, m2l, share: slice):
+        """The M2L partners of every cell (both directions of ``m2l[share]``), as rows."""
+        key = ("m2l_rows", theta, share.start, share.stop)
+        if key not in self._traversals:
+            rows = np.zeros(self.node_count + 1, dtype=np.int64)
+            count = share.stop - share.start
+            partners = np.empty(max(2 * count, 1), dtype=np.int64)
+            cursor = np.empty(self.node_count, dtype=np.int64)
+            self._kernels.pair_csr(m2l[share], count, 1, rows, partners, cursor)
+            self._traversals[key] = (rows, partners)
+        return self._traversals[key]
 
     def _fmm_shares(self, theta: float) -> tuple[slice, slice, slice]:
         """This rank's M2L pairs, leaves (for L2P) and P2P pairs, each an even share."""
@@ -740,6 +840,7 @@ class FlatQuadtree:
         if charges.shape[0] != self.pos.shape[1]:
             raise ValueError("charges must have one entry per particle")
         self.charge[...] = charges
+        self._sorted = None
         if self.pos.shape[1]:
             self._moments()
 
@@ -751,6 +852,92 @@ class FlatQuadtree:
         """Views of every node that holds at least one particle."""
         occupied = _host(self._xp.flatnonzero(self.node_end > self.node_start))
         return [FlatNode(self, int(i)) for i in occupied]
+
+    def _sorted_sources(self):
+        """The sources' positions and charges in tree order (``perm``), kept until they change."""
+        if self._sorted is None:
+            spos = getattr(self, "_sorted_pos", None)
+            if spos is None:
+                # one spare column: Pyccel takes a (2, 1) array for a Fortran-ordered one
+                n = self.pos.shape[1]
+                spos = np.zeros((2, n + 1))
+                spos[:, :n] = self.pos[:, self.perm]
+            self._sorted = (spos, np.ascontiguousarray(self.charge[self.perm]))
+        return self._sorted
+
+    def _target_order(self, targets: np.ndarray) -> np.ndarray:
+        """An order of the targets in which consecutive ones are close.
+
+        The tree order for the sources themselves, else the Morton (Z) order of their
+        positions.
+        """
+        if targets.shape == self.pos.shape and np.array_equal(targets, self.pos):
+            return self.perm
+        lo = targets.min(axis=1, keepdims=True)
+        span = float(np.max(targets.max(axis=1, keepdims=True) - lo))
+        cells = ((targets - lo) * ((65535.0 / span) if span > 0 else 0.0)).astype(
+            np.uint64
+        )
+        key = np.zeros(targets.shape[1], dtype=np.uint64)
+        for axis, shift in ((0, 1), (1, 0)):
+            v = cells[axis]
+            v = (v | (v << np.uint64(8))) & np.uint64(0x00FF00FF)
+            v = (v | (v << np.uint64(4))) & np.uint64(0x0F0F0F0F)
+            v = (v | (v << np.uint64(2))) & np.uint64(0x33333333)
+            v = (v | (v << np.uint64(1))) & np.uint64(0x55555555)
+            key |= v << np.uint64(shift)
+        return np.argsort(key, kind="stable")
+
+    def _evaluate_groups(
+        self, targets, exclude, theta, softening, potential, phi, field, status
+    ):
+        """`evaluate` on the CPU: the walk of ``evaluate_groups`` by groups of targets.
+
+        The groups are runs of nearby targets; each target gets the same terms as in its
+        own walk.
+        """
+        order = self._target_order(targets)
+        n_targets = targets.shape[1]
+        spos, scharge = self._sorted_sources()
+        log_kernel = self.kernel == "log"
+        empty = np.zeros((1, 1))
+        # one spare column: Pyccel takes a (2, 1) array for a Fortran-ordered one
+        sorted_targets = np.empty((2, n_targets + 1))
+        sorted_targets[:, :n_targets] = targets[:, order]
+        phi_sorted = np.empty(n_targets)
+        field_sorted = np.empty((2, n_targets + 1))
+        self._kernels.evaluate_groups(
+            sorted_targets,
+            np.ascontiguousarray(exclude[order]),
+            np.append(np.arange(0, n_targets, GROUP_SIZE), n_targets),
+            1 if log_kernel else 0,
+            1 if potential else 0,
+            spos,
+            scharge,
+            self.perm,
+            self.node_center,
+            self.node_half,
+            self.node_start,
+            self.node_end,
+            self.node_child,
+            self.node_q,
+            self.node_qabs,
+            self.node_p,
+            self.node_s,
+            self.moment_re if log_kernel else empty,
+            self.moment_im if log_kernel else empty,
+            float(theta),
+            float(softening),
+            self._stack.shape[0],
+            phi_sorted,
+            field_sorted,
+        )
+        phi[order] = phi_sorted
+        field[:, order] = field_sorted[:, :n_targets]
+        bad = np.flatnonzero(phi == 1.0e300)
+        if bad.size:
+            phi[bad[0]] = 0.0
+            status[0] = bad[0] + 1
 
     @method(
         equations={
@@ -775,10 +962,14 @@ class FlatQuadtree:
         problem=_walk_problem,
     )
     @sp.profile("tree_d_3d.flat_tree.evaluate", tags=_PROFILE_TAGS)
-    def evaluate(self, targets, *, exclude=None, theta=0.5, softening=0.0):
+    def evaluate(
+        self, targets, *, exclude=None, theta=0.5, softening=0.0, potential=True
+    ):
         """Potential ``(M,)`` and field ``(2, M)`` at ``targets`` ``(2, M)``, without ``k_e``.
 
         ``exclude[i]`` is a source index skipped for target ``i`` (-1: none).
+        ``potential=False`` returns the potential as zeros, which saves the logarithms
+        of the line-charge kernel when only the field is needed.
         """
         targets = _points(targets, "targets", compiled=self._compiled)
         n_targets = targets.shape[1]
@@ -789,7 +980,13 @@ class FlatQuadtree:
         field = self._xp.zeros((2, n_targets))
         status = self._xp.zeros(1, dtype=np.int64)
         n_sources = self.pos.shape[1]
-        if self.kernel == "log" and n_sources and n_targets:
+        if isinstance(self.pos, np.ndarray) and n_sources and n_targets:
+            self._evaluate_groups(
+                targets, exclude, theta, softening, potential, phi, field, status
+            )
+            _check(status)
+            return phi, field
+        elif self.kernel == "log" and n_sources and n_targets:
             self._kernels.evaluate_log_quadtree(
                 targets,
                 exclude,
@@ -836,6 +1033,8 @@ class FlatQuadtree:
                 status,
             )
             _check(status)
+        if not potential:
+            phi[...] = 0.0
         return phi, field
 
     def _traverse(self, theta: float):
@@ -950,7 +1149,20 @@ class FlatQuadtree:
         # each rank takes a share of the M2L pairs, the leaves and the P2P pairs; the
         # expansions and fields are sums, completed by an allreduce
         m2l_share, leaf_share, p2p_share = self._fmm_shares(theta)
-        if m2l_share.stop > m2l_share.start:
+        host = isinstance(self.pos, np.ndarray)
+        if host and m2l_share.stop > m2l_share.start:
+            rows, partners = self._m2l_rows(theta, m2l, m2l_share)
+            k.fmm_m2l_host(
+                rows,
+                partners,
+                self.node_center,
+                self.moment_re,
+                self.moment_im,
+                self._m2l_coefficients(),
+                local_re,
+                local_im,
+            )
+        if not host and m2l_share.stop > m2l_share.start:
             k.fmm_m2l(
                 m2l[m2l_share],
                 m2l_share.stop - m2l_share.start,
@@ -982,7 +1194,33 @@ class FlatQuadtree:
                 n_threads=int(hi - lo),
             )
         status = self._xp.zeros(1, dtype=np.int64)
-        if not collectives.is_parallel(self.comm):
+        if host and not collectives.is_parallel(self.comm):
+            spos, scharge = self._sorted_sources()
+            phi_sorted = np.zeros(n)
+            field_sorted = np.zeros((2, n + 1))
+            k.fmm_evaluate_host(
+                spos,
+                scharge,
+                count,
+                self.node_center,
+                self.node_start,
+                self.node_end,
+                self.node_child,
+                local_re,
+                local_im,
+                p2p,
+                int(sizes[1]),
+                softening,
+                1 if potential else 0,
+                phi_sorted,
+                field_sorted,
+                status,
+            )
+            if int(status[0]):
+                status[0] = self.perm[int(status[0]) - 1] + 1
+            phi[self.perm] = phi_sorted
+            field[:, self.perm] = field_sorted[:, :n]
+        elif not collectives.is_parallel(self.comm):
             k.fmm_evaluate(
                 self.pos,
                 self.charge,

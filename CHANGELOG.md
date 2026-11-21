@@ -37,6 +37,23 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     periods along x).
   - The CPU tree build splits a level in one `quadtree_split` kernel call instead of
     `(N, 4)` prefix sums: builds 1.1-1.6x faster, the trees unchanged.
+- Faster single-core CPU paths (200k particles, one thread, against the previous commit):
+  tree walk 1.9 to 0.85 s (Coulomb) and 4.8 to 2.4 s (log), FMM 1.55 to 0.72 s (leaves of
+  8, order 12) and 1.24 to 0.62 s (32, 18), a simulation step 2x, 50k panel probes 0.43 to
+  0.09 s. Results agree with the previous ones to round-off. The GPU kernels are unchanged.
+  - The walk (`FlatQuadtree.evaluate`) takes nearby targets in groups of 32 (tree or
+    Morton order), the group walking the tree once with a mask of the targets still
+    walking, so each target gets the same cells as alone; sources are read in tree order.
+  - FMM: M2L by destination cell (`fmm_m2l_host`, rows from `pair_csr`), as a real
+    matrix on scaled moments, without atomics; the near field on the particles in tree
+    order (`fmm_evaluate_host`).
+  - Moments in one upward pass (leaves from their particles, then M2M), instead of every
+    cell summing its particles; the CPU build is one `quadtree_build` call, which replaces
+    `quadtree_split`.
+  - `FlatQuadtree.evaluate(potential=False)` skips the log kernel's logarithms; steps of
+    `ElectrostaticSimulation` with the log kernel's tree or FMM skip the potential, which
+    `get_potential_energy` computes when asked (`compute_fields(potential=...)`).
+  - Panel probes find exact hits on panel nodes without a full nearest-neighbour search.
 
 ## [0.2.0] - 2026-11-20
 

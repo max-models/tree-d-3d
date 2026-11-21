@@ -50,7 +50,15 @@ KERNEL_NAMES = (
 METAL_KERNEL_NAMES = KERNEL_NAMES
 
 #: Kernels for the CPU only (Pyccel and NumPy versions): the GPU does their work otherwise.
-HOST_KERNEL_NAMES = ("quadtree_split",)
+HOST_KERNEL_NAMES = (
+    "pair_csr",
+    "fmm_m2l_host",
+    "log_moments_upward",
+    "quadtree_moments_upward",
+    "evaluate_groups",
+    "fmm_evaluate_host",
+    "quadtree_build",
+)
 
 _COMPILED: bool | None = None
 

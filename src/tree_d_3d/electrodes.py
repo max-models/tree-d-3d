@@ -183,6 +183,8 @@ def _point_field(points, sources) -> tuple[np.ndarray, np.ndarray]:
 _PERIODIC_ASYMPTOTE = 30.0
 #: Rows of the pairwise arrays held at once by the periodic sums.
 _PAIRS_PER_CHUNK = 2_000_000
+# the search radius of exact-coincidence queries (a k-d tree prunes beyond it at once)
+_TINY = 1e-150
 
 
 def _periodic_rules() -> dict:
@@ -1072,7 +1074,9 @@ class BoundaryIntegralElectrodes:
                 self._trees[("periodic", key)] = tree
         else:
             tree.set_charges(charges)
-        distance, nearest = KDTree(sources.T).query(points.T)
+        distance, nearest = KDTree(sources.T).query(
+            points.T, distance_upper_bound=_TINY
+        )
         exclude = np.where(distance == 0.0, nearest, -1).astype(np.int64)
         phi_z, field_z = tree.evaluate(mapped_t, exclude=exclude, theta=FMM_THETA)
         phi_z, field_z = np.asarray(phi_z), np.asarray(field_z)
@@ -1265,7 +1269,10 @@ class BoundaryIntegralElectrodes:
 
     def _node_exclude(self, points: np.ndarray, image: int) -> np.ndarray:
         """Per target, a node of the image it sits on exactly (-1: none)."""
-        distance, nearest = self._image_node_trees[image].query(points.T)
+        # exact hits only: a tiny search radius prunes the k-d tree walk at once
+        distance, nearest = self._image_node_trees[image].query(
+            points.T, distance_upper_bound=_TINY
+        )
         return np.where(distance == 0.0, nearest, -1).astype(np.int64)
 
     @sp.profile("tree_d_3d.electrodes.panel_field", tags=_PROFILE_TAGS)
