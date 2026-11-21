@@ -8,9 +8,9 @@ from typing import TYPE_CHECKING
 import cunumpy as xp
 import numpy as np
 import scope_profiler as sp
+from maybempi import collectives
 from methodcard import ConvergenceProblem, Rule, method
 
-from tree_d_3d import distributed
 from tree_d_3d._profiling import _PROFILE_TAGS
 from tree_d_3d._utils import _check, _device, _finite, _host
 from tree_d_3d.bodies import ChargedBody
@@ -272,7 +272,7 @@ class ElectrostaticSimulation:
 
     ``comm``, an MPI communicator, shares the particles out over its ranks: each
     rank passes its own bodies, gathers everyone's to build the whole tree and
-    evaluates its own (`tree_d_3d.distributed`). The diagnostics are sums over the
+    evaluates its own (`maybempi.collectives`). The diagnostics are sums over the
     ranks, so every rank must call them.
     """
 
@@ -601,20 +601,20 @@ class ElectrostaticSimulation:
                 and np.array_equal(charge, self.charges)
                 and np.array_equal(fixed, self.fixed)
             )
-        if distributed.is_parallel(self.comm):
-            return distributed.total(self.comm, int(not current)) == 0
+        if collectives.is_parallel(self.comm):
+            return collectives.allsum(self.comm, int(not current)) == 0
         return current
 
     def _all_sources(self) -> tuple[np.ndarray, np.ndarray, int]:
         """Every rank's positions and charges, and the index of this rank's first particle.
 
         With one process, the particles themselves. Every rank gets the same arrays, so
-        every rank builds the same tree (`tree_d_3d.distributed`).
+        every rank builds the same tree (`maybempi.collectives`).
         """
-        if not distributed.is_parallel(self.comm):
+        if not collectives.is_parallel(self.comm):
             return self.positions, self.charges, 0
-        positions, offset = distributed.gather_columns(self.comm, self.positions)
-        charges, _ = distributed.gather_columns(self.comm, self.charges)
+        positions, offset = collectives.gather_columns(self.comm, self.positions)
+        charges, _ = collectives.gather_columns(self.comm, self.charges)
         return positions, charges, offset
 
     def _expand_bounds(self, points: np.ndarray | None = None) -> None:
@@ -809,7 +809,7 @@ class ElectrostaticSimulation:
 
     def get_kinetic_energy(self) -> float:
         local = float(0.5 * np.sum(self.masses * np.sum(self.velocities**2, axis=0)))
-        return float(distributed.total(self.comm, local))
+        return float(collectives.allsum(self.comm, local))
 
     @method(
         equations={
@@ -833,7 +833,7 @@ class ElectrostaticSimulation:
         """
         if self.k_e == 0:
             return 0.0
-        if distributed.is_parallel(self.comm):
+        if collectives.is_parallel(self.comm):
             # collective: every rank takes part, with or without particles of its own
             if not exact:
                 self.compute_fields()
@@ -855,7 +855,7 @@ class ElectrostaticSimulation:
                         np.sum(charges) - self.charges
                     )
                 local = float(0.5 * self.k_e * self.charges @ phi)
-            return float(distributed.total(self.comm, local))
+            return float(collectives.allsum(self.comm, local))
         if not len(self.bodies):
             return 0.0
         if not exact:
@@ -889,22 +889,22 @@ class ElectrostaticSimulation:
         return self.get_kinetic_energy() + self.get_potential_energy(exact)
 
     def get_total_charge(self) -> float:
-        return float(distributed.total(self.comm, float(np.sum(self.charges))))
+        return float(collectives.allsum(self.comm, float(np.sum(self.charges))))
 
     def get_center_of_mass(self) -> np.ndarray:
         local = np.append(self.positions @ self.masses, np.sum(self.masses))
-        weighted = distributed.total(self.comm, local)
+        weighted = collectives.allsum(self.comm, local)
         if not weighted[2]:
             return np.zeros(2)
         return weighted[:2] / weighted[2]
 
     def get_momentum(self) -> np.ndarray:
         local = self.velocities @ self.masses if len(self.masses) else np.zeros(2)
-        return distributed.total(self.comm, np.asarray(local, dtype=float))
+        return collectives.allsum(self.comm, np.asarray(local, dtype=float))
 
     def get_angular_momentum(self) -> float:
         """Mechanical angular momentum about the origin (z component)."""
         x, y = self.positions
         vx, vy = self.velocities
         local = float(np.sum(self.masses * (x * vy - y * vx)))
-        return float(distributed.total(self.comm, local))
+        return float(collectives.allsum(self.comm, local))

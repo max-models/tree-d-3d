@@ -47,13 +47,13 @@ from typing import Protocol
 
 import numpy as np
 import scope_profiler as sp
+from maybempi import collectives
 from methodcard import ConvergenceProblem, Rule, method
 from scipy.linalg import lu_factor, lu_solve
 from scipy.sparse import csc_matrix
 from scipy.sparse.linalg import LinearOperator, gmres
 from scipy.spatial import KDTree
 
-from tree_d_3d import distributed
 from tree_d_3d._profiling import _PROFILE_TAGS
 from tree_d_3d.constants import K_E
 from tree_d_3d.flat_tree import FlatQuadtree, direct_field
@@ -645,7 +645,7 @@ class BoundaryIntegralElectrodes:
         Each rank builds its share of the rows; every rank gets the whole matrix.
         """
         k = self.far_points
-        rows = distributed.block(self.num_panels, self.comm)
+        rows = collectives.block(self.num_panels, self.comm)
         targets = self.midpoints[:, rows]
         matrix = np.zeros((targets.shape[1], self.num_panels))
         for image, sign in enumerate(self._image_signs):
@@ -669,8 +669,8 @@ class BoundaryIntegralElectrodes:
             self.midpoints, target, panel, image, shift
         )
         np.add.at(matrix, (target - rows.start, panel), correction)
-        if distributed.is_parallel(self.comm):
-            matrix = distributed.gather_blocks(
+        if collectives.is_parallel(self.comm):
+            matrix = collectives.gather_blocks(
                 self.comm, np.ascontiguousarray(matrix.T), self.num_panels
             ).T
         return np.ascontiguousarray(matrix)
@@ -842,7 +842,7 @@ class BoundaryIntegralElectrodes:
             for first in range(0, panels.size, PRECONDITIONER_BLOCK):
                 blocks.append(panels[first : first + PRECONDITIONER_BLOCK])
         # each rank factorises its share of the blocks; `_precondition` gathers
-        mine = blocks[distributed.block(len(blocks), self.comm)]
+        mine = blocks[collectives.block(len(blocks), self.comm)]
         self._blocks = [(block, lu_factor(self._exact_block(block))) for block in mine]
         self._block_order = np.concatenate(blocks)
         # the tree's sources (every image's nodes) and its charge-free targets
@@ -1032,13 +1032,13 @@ class BoundaryIntegralElectrodes:
         """``function`` of a share of ``range(n)`` per rank, its arrays gathered along the last axis.
 
         Serially ``function(slice(0, n))``; on several ranks each evaluates its own
-        share (`distributed.block`) and every rank gets the whole result.
+        share (`maybempi.collectives.block`) and every rank gets the whole result.
         """
-        if not distributed.is_parallel(self.comm):
+        if not collectives.is_parallel(self.comm):
             return function(slice(0, n))
         return tuple(
-            distributed.gather_blocks(self.comm, part, n)
-            for part in function(distributed.block(n, self.comm))
+            collectives.gather_blocks(self.comm, part, n)
+            for part in function(collectives.block(n, self.comm))
         )
 
     def _periodic_tree_sum(self, points, sources, charges, key):
@@ -1175,7 +1175,7 @@ class BoundaryIntegralElectrodes:
     def _precondition(self, residual: np.ndarray) -> np.ndarray:
         """The block-Jacobi solve (`_prepare_iterative`), each rank solving its blocks."""
         local = [lu_solve(lu, residual[block]) for block, lu in self._blocks]
-        solved, _ = distributed.gather_columns(
+        solved, _ = collectives.gather_columns(
             self.comm, np.concatenate(local) if local else np.zeros(0)
         )
         out = np.empty_like(residual)

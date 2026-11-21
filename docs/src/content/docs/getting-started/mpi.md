@@ -19,16 +19,16 @@ every rank, so every rank must call them (they are collective):
 
 ```python
 import numpy as np
-from maybempi import MPI
+from maybempi import MPI, collectives
 
-from tree_d_3d import ChargedBody, ElectrostaticSimulation, Quad, distributed
+from tree_d_3d import ChargedBody, ElectrostaticSimulation, Quad
 
 comm = MPI.COMM_WORLD
 rng = np.random.default_rng(1)
 positions = rng.uniform(-0.9, 0.9, (2, 400_000))
 charges = rng.choice([-1.0, 1.0], 400_000)
 
-mine = distributed.block(400_000, comm)  # this rank's share
+mine = collectives.block(400_000, comm)  # this rank's share
 bodies = [
     ChargedBody(*positions[:, i], charge=charges[i])
     for i in range(mine.start, mine.stop)
