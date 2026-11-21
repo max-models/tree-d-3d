@@ -12,6 +12,12 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   line-charge guiding centres by the FMM and matches Davidson's growth rates of a thin
   annulus to within 3%; the Coulomb explosion follows the exact self-similar expansion of a
   uniform disk to 3e-4 and the wave breaking of a Gaussian cloud.
+- Examples `galaxy_collision` (Toomre-style tidal tails of a prograde disk, a retrograde one
+  intact, the cores on the two-body parabola, energy error against the opening angle),
+  `cold_collapse` (a Maclaurin disk falling in, violent relaxation to virial equilibrium,
+  and a rotating one fragmenting) and `two_stream_instability` (electron holes in phase
+  space; a periodic slab summed by the FMM after a conformal map onto an annulus; growth
+  rates against the cold-beam dispersion relation).
 - MPI: `ElectrostaticSimulation`, `BoundaryIntegralElectrodes` and `FlatQuadtree` take
   `comm=`, an MPI communicator (via maybempi, a new dependency), and agree with serial runs
   to round-off. Sources are replicated and targets distributed: every rank builds the whole
