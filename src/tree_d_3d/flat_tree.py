@@ -1423,13 +1423,18 @@ class FlatQuadtree:
             "l2l": r"b^\mathrm{child}_m \mathrel{+}= \sum_{l=m}^{p} \binom{l}{m} b_l\, s^{\,l-m}, \qquad s = c_\mathrm{child} - c_\mathrm{parent}",
             "l2p": r"W = \sum_{l=0}^{p} b_l u^l, \qquad \phi \mathrel{+}= -2\operatorname{Re} W, \qquad E_x - iE_y \mathrel{+}= 2W', \qquad u = z_i - c_\mathrm{leaf}",
             "p2p": r"\phi_i \mathrel{+}= -\sum_j q_j \ln\left(r_{ij}^2 + \varepsilon^2\right), \qquad \mathbf E_i \mathrel{+}= 2\sum_j \frac{q_j\, \mathbf d_{ij}}{r_{ij}^2 + \varepsilon^2}",
+            "coulomb_moments": r"m_{\boldsymbol\alpha} = \sum_j q_j (\mathbf r_j - \mathbf c)^{\boldsymbol\alpha}, \quad |\boldsymbol\alpha| \le p \qquad \text{(Cartesian, } \mathbf r^{\boldsymbol\alpha} = x^{\alpha_x} y^{\alpha_y}\text{; leaves, then M2M)}",
+            "coulomb_taylor": r"n R^2 A_{\boldsymbol\gamma} = -(2n - 1)\left(t_x A_{\boldsymbol\gamma - \mathbf e_x} + t_y A_{\boldsymbol\gamma - \mathbf e_y}\right) - (n - 1)\left(A_{\boldsymbol\gamma - 2\mathbf e_x} + A_{\boldsymbol\gamma - 2\mathbf e_y}\right), \quad A_{\mathbf 0} = \frac1R, \quad R^2 = |\mathbf t|^2 + \varepsilon^2, \quad n = |\boldsymbol\gamma|",
+            "coulomb_m2l": r"T_{\boldsymbol\beta} \mathrel{+}= \sum_{|\boldsymbol\alpha| + |\boldsymbol\beta| \le p} (-1)^{|\boldsymbol\alpha|} \binom{\boldsymbol\alpha + \boldsymbol\beta}{\boldsymbol\alpha} m_{\boldsymbol\alpha}\, A_{\boldsymbol\alpha + \boldsymbol\beta}(\mathbf t), \qquad \phi(\mathbf c + \mathbf u) = \sum_{\boldsymbol\beta} T_{\boldsymbol\beta}\, \mathbf u^{\boldsymbol\beta}, \quad \mathbf E = -\nabla\phi",
         },
         order={"potential": 3, "field": 2},
         assumptions=(
-            r"the log kernel only, $0 < \theta < 1$; every particle is a target; each pair is listed once and used in both directions",
+            r"$0 < \theta < 1$; every particle is a target; each pair is listed once and used in both directions",
+            r"`kernel=\"coulomb\"` (CPU only): Cartesian expansions of the softened kernel $f = (|\mathbf r|^2 + \varepsilon^2)^{-1/2}$ to total degree $p$ (`order`, default 4), $A_{\boldsymbol\gamma} = \partial^{\boldsymbol\gamma} f / \boldsymbol\gamma!$ by the Taylor recurrence; the total-degree truncation makes pair forces exactly antisymmetric; softened throughout, far field included",
+            r"`fmm_at`: the same traversal between a tree of the targets and the sources' tree, one way, with exact sums between their leaves",
             r"the local expansion $\Phi_L(z) = \sum_l b_l (z - c)^l$ of degree $p$ about each cell centre; $\ln t$ on the principal branch, which shifts $b_0$ by $2\pi i a_0$ and drops out of $\operatorname{Re}$",
             r"the triangle truncation makes the mutual pair forces exactly antisymmetric (same error order, larger constant)",
-            r"softening acts on the P2P pairs only; no automatic error control: $\theta$ and $p$ set the accuracy",
+            r"log kernel: softening acts on the P2P pairs only; no automatic error control: $\theta$ and $p$ set the accuracy",
             r"the error of an M2L is $O((r/d)^{p+1})$ in the potential and $O((r/d)^{p})$ in the field, $r/d$ the cluster size over the cell distance; the declared orders are those at the $p = 2$ of the test problem",
         ),
         references=(
@@ -1444,20 +1449,23 @@ class FlatQuadtree:
     def fmm(
         self, *, theta: float = 0.5, softening: float = 0.0, potential: bool = True
     ):
-        """Line-charge potential and field at every source, by the FMM.
+        """Potential and field at every source, by the FMM.
 
-        Fast multipole method for ``kernel="log"`` (Greengard-Rokhlin, complex
-        form): a dual-tree traversal pairs well-separated cells, whose
+        Fast multipole method, for ``kernel="log"`` in complex form
+        (Greengard-Rokhlin), for ``kernel="coulomb"`` with Cartesian expansions of the
+        softened kernel to total degree ``order`` (on the CPU only, softened in the far
+        field too; `tree_d_3d._cartesian`): a dual-tree traversal pairs well-separated cells, whose
         multipole expansions are translated into each other's local
         expansions (M2L, both ways at once); local expansions are shifted down
         the tree (L2L) and evaluated at the particles (L2P); leaves that are
         not well separated interact exactly (P2P). Cost is O(N) rather than the O(N log N) of
         `evaluate` with every particle as a target. Returns the raw
         potential ``(N,)`` and field ``(2, N)`` in input order, without ``k_e``,
-        excluding each particle's own charge; softening applies to the exact
-        near field only.
+        excluding each particle's own charge; for line charges softening applies to
+        the exact near field only.
         ``potential=False`` skips the potential (returned as zeros), which saves
-        a logarithm per near-field pair when only forces are needed.
+        a logarithm per near-field pair of line charges when only forces are needed.
+        `fmm_at` is the same at points other than the sources.
         """
         theta = _finite("theta", theta, minimum=0)
         if not 0 < theta < 1:

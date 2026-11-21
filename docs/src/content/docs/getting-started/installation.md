@@ -17,6 +17,11 @@ The kernels are compiled on first use and cached in `~/.cache/tree-d-3d/kernels`
 (`TREE_D_3D_KERNEL_CACHE` moves it). They are built with OpenMP; `TREE_D_3D_OPENMP=0` builds them
 serial, `OMP_NUM_THREADS` limits the threads.
 
+`TREE_D_3D_FLAGS` adds C compiler flags to the builds (with cunumpy's devel branch, kept apart in
+the cache): `TREE_D_3D_FLAGS="-march=native -ffast-math"` made the tree walk of point charges
+1.45x and a GMRES panel solve 1.2x faster on one Xeon core, other parts 1.0-1.2x. Such builds
+may not run on another CPU, and `-ffast-math` changes the rounding, so none are set by default.
+
 ## Optional extras
 
 | Extra   | Installs                                                  |
