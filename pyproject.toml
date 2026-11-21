@@ -25,7 +25,7 @@ dependencies = [
   "maybempi>=0.1.2",
   "methodcard",
   "numpy",
-  "pyccel>2.0",
+  "pyccel>2.0; sys_platform != 'emscripten'",
   "scipy",
   "scope-profiler>=0.7.5",
   "simgeometry>=0.2.1",

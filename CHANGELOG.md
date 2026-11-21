@@ -7,6 +7,13 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- tree-d-3d runs in the browser with Pyodide, and a live demo page in the docs builds a
+  quadtree there: sliders for the particles, leaf capacity, opening angle and a target redraw
+  the cells, the target's Barnes-Hut walk and the field errors against the direct sum. It uses
+  starlight-theme's `PyodideDemo`; the docs workflow builds the wheels it installs
+  (`pyodide: true`), and a Pyodide check in CI (`.github/workflows/pyodide.yml`) installs the
+  wheel, imports every module and runs the demo. Pyccel is not installed there
+  (`sys_platform != 'emscripten'`).
 - A fast multipole method for point charges: `FlatQuadtree.fmm` takes `kernel="coulomb"`, with
   Cartesian expansions of the softened kernel to total degree `order` (default `COULOMB_ORDER`
   = 4; `LOG_ORDER` = 12 stays the log kernel's default), M2M moments, M2L by a Taylor
@@ -46,6 +53,11 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Without Pyccel (in Pyodide, or where it fails to compile) the CPU tree walk runs a
+  vectorized NumPy walk, all targets descending the tree together, instead of the Pyccel
+  loops in the interpreter, and the tree is built with the level-by-level NumPy kernels: in
+  Pyodide, 5000 particles take 0.33 instead of 7.9 s to walk and 0.04 instead of 0.2 s to
+  build.
 - GMRES products walk the panels' tree at the midpoints instead of running the FMM over
   every Gauss node: 0.11 instead of 0.17 s per product at 21k panels on one core.
 - Faster panel solves and sums (measured on a 4-core CPU, 3 runs each):

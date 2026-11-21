@@ -56,6 +56,18 @@ _KERNELS = ("coulomb", "log")
 #: build the tree in one ``quadtree_build`` call on the CPU (off: the GPU's level kernels)
 _HOST_BUILD = True
 
+
+def _compiled_host_build(kernels) -> bool:
+    """Whether ``quadtree_build`` runs compiled: else the level kernels (NumPy) are faster.
+
+    Without Pyccel (e.g. in Pyodide) its NumPy version is the Pyccel loop run by the
+    interpreter, while the level kernels are vectorized; the uncompiled reference kernels
+    (``compiled=False``) keep the single call.
+    """
+    host = getattr(kernels.quadtree_build, "host_kernel", None)
+    return host is None or host.kernel.selected() != "numpy"
+
+
 #: targets per group of the CPU walk (`FlatQuadtree.evaluate`), at most 62
 GROUP_SIZE = 32
 
@@ -521,7 +533,7 @@ class FlatQuadtree:
         """Split the nodes level by level; returns the node count.
 
         On the CPU the whole build is one ``quadtree_build`` call (`_build_host`); on
-        the GPU (and with ``_HOST_BUILD`` off) every level is one ``quadtree_quadrants``
+        the GPU (and with ``_HOST_BUILD`` off or without Pyccel) every level is one ``quadtree_quadrants``
         and one ``quadtree_scatter`` launch over the particles with prefix sums in
         between. Either way the nodes are numbered breadth first and each node's
         particles keep their input order, as in a serial build.
@@ -530,7 +542,7 @@ class FlatQuadtree:
         x, k = self._xp, self._kernels
         n = self.pos.shape[1]
         capacity = 4 * (2 * n // self.leaf_capacity + 16)
-        if _HOST_BUILD and isinstance(self.pos, np.ndarray):
+        if _HOST_BUILD and isinstance(self.pos, np.ndarray) and _compiled_host_build(k):
             return self._build_host(root_quad, capacity)
         self.node_center = x.empty((capacity, 2))
         self.node_half = x.empty(capacity)

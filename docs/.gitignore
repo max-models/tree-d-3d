@@ -8,3 +8,5 @@ public/examples/
 public/example-scripts/
 src/content/docs/examples/*.mdx
 src/content/docs/example-scripts/*.mdx
+# the wheels the live demo installs, built by starlight-pyodide wheels
+public/pyodide/
