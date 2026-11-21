@@ -47,6 +47,9 @@ MAX_ORDER = 64
 
 _KERNELS = ("coulomb", "log")
 
+#: build the tree in one ``quadtree_build`` call on the CPU (off: the GPU's level kernels)
+_HOST_BUILD = True
+
 #: targets per group of the CPU walk (`FlatQuadtree.evaluate`), at most 62
 GROUP_SIZE = 32
 
@@ -458,20 +461,70 @@ class FlatQuadtree:
         self.moment_re = self._xp.zeros((1, self.order + 1))
         self.moment_im = self._xp.zeros((1, self.order + 1))
 
+    def _build_host(self, root_quad: Quad, capacity: int) -> int:
+        """`_build` on the CPU: the whole build in one ``quadtree_build`` call."""
+        n = self.pos.shape[1]
+        int_scratch = [np.empty(n, dtype=np.int64) for _ in range(5)]
+        perm, slot_node, quadrant, new_perm, new_slot_node = int_scratch
+        # one spare column, as Pyccel takes a (2, 1) array for a Fortran-ordered one
+        new_sorted_pos = np.empty((2, n + 1))
+        sizes = np.zeros(3, dtype=np.int64)
+        while True:
+            sorted_pos = np.zeros((2, n + 1))
+            sorted_pos[:, :n] = self.pos
+            self.node_center = np.empty((capacity, 2))
+            self.node_half = np.empty(capacity)
+            self.node_start = np.empty(capacity, dtype=np.int64)
+            self.node_end = np.empty(capacity, dtype=np.int64)
+            self.node_child = np.empty(capacity, dtype=np.int64)
+            self.node_depth = np.empty(capacity, dtype=np.int64)
+            self.node_center[0] = (root_quad.xmid, root_quad.ymid)
+            self.node_half[0] = root_quad.half
+            levels = np.empty(capacity + 1, dtype=np.int64)
+            self._kernels.quadtree_build(
+                sorted_pos,
+                self.leaf_capacity,
+                self.max_depth,
+                self.node_center,
+                self.node_half,
+                self.node_start,
+                self.node_end,
+                self.node_child,
+                self.node_depth,
+                perm,
+                levels,
+                slot_node,
+                quadrant,
+                np.empty(capacity, dtype=np.int64),
+                new_sorted_pos,
+                new_perm,
+                new_slot_node,
+                sizes,
+            )
+            if not sizes[2]:
+                break
+            capacity *= 2
+        self.perm = perm
+        self.levels = levels[: sizes[1] + 1].copy()
+        # the build leaves the positions in tree order
+        self._sorted_pos = sorted_pos
+        return int(sizes[0])
+
     def _build(self, root_quad: Quad) -> int:
         """Split the nodes level by level; returns the node count.
 
-        On the GPU every level is one ``quadtree_quadrants`` and one
-        ``quadtree_scatter`` launch over the particles with prefix sums in between;
-        on the CPU one ``quadtree_split`` call counts, ranges and partitions the
-        particles in two passes, without the ``(N, 4)`` prefix sums. Either way the
-        nodes are numbered breadth first and each node's particles keep their input
-        order, as in a serial build. ``self.levels[d]:self.levels[d + 1]`` are the
-        nodes at depth ``d``.
+        On the CPU the whole build is one ``quadtree_build`` call (`_build_host`); on
+        the GPU (and with ``_HOST_BUILD`` off) every level is one ``quadtree_quadrants``
+        and one ``quadtree_scatter`` launch over the particles with prefix sums in
+        between. Either way the nodes are numbered breadth first and each node's
+        particles keep their input order, as in a serial build.
+        ``self.levels[d]:self.levels[d + 1]`` are the nodes at depth ``d``.
         """
         x, k = self._xp, self._kernels
         n = self.pos.shape[1]
         capacity = 4 * (2 * n // self.leaf_capacity + 16)
+        if _HOST_BUILD and isinstance(self.pos, np.ndarray):
+            return self._build_host(root_quad, capacity)
         self.node_center = x.empty((capacity, 2))
         self.node_half = x.empty(capacity)
         self.node_start = x.empty(capacity, dtype=np.int64)
@@ -488,12 +541,7 @@ class FlatQuadtree:
         slot_node = x.zeros(n, dtype=np.int64)
         new_perm = x.empty(n, dtype=np.int64)
         new_slot_node = x.empty(n, dtype=np.int64)
-        host = isinstance(self.pos, np.ndarray)  # the CPU (NumPy arrays), not CuPy
         quadrant = x.empty(n, dtype=np.int64)
-        cursor = x.zeros(capacity, dtype=np.int64) if host else None
-        # the positions in slot order, so that the CPU split reads them in order
-        sorted_pos = np.array(self.pos, dtype=float, copy=True) if host else None
-        new_sorted_pos = np.empty_like(sorted_pos) if host else None
         quadrants = x.arange(4)
         x_sign = x.asarray([-1.0, 1.0, -1.0, 1.0])
         y_sign = x.asarray([1.0, 1.0, -1.0, -1.0])
@@ -516,8 +564,6 @@ class FlatQuadtree:
                     new = x.empty((capacity, *old.shape[1:]), dtype=old.dtype)
                     new[:hi] = old[:hi]
                     setattr(self, name, new)
-                if host:
-                    cursor = x.zeros(capacity, dtype=np.int64)
             rank = x.cumsum(split, dtype=np.int64) - split
             self.node_child[lo:hi] = x.where(split, hi + 4 * rank, -1)
             parents = lo + x.flatnonzero(split)
@@ -531,30 +577,6 @@ class FlatQuadtree:
             self.node_center[children, 1] = (
                 self.node_center[parents, 1][:, None] + y_sign * half
             )
-            if host:
-                assert cursor is not None and sorted_pos is not None
-                cursor[hi:count] = 0
-                k.quadtree_split(
-                    sorted_pos,
-                    perm,
-                    slot_node,
-                    self.node_center,
-                    self.node_child,
-                    self.node_start,
-                    self.node_end,
-                    np.int64(lo),
-                    np.int64(hi),
-                    cursor,
-                    quadrant,
-                    new_sorted_pos,
-                    new_perm,
-                    new_slot_node,
-                )
-                sorted_pos, new_sorted_pos = new_sorted_pos, sorted_pos
-                perm, new_perm = new_perm, perm
-                slot_node, new_slot_node = new_slot_node, slot_node
-                levels.append(count)
-                continue
             k.quadtree_quadrants(
                 self.pos, perm, slot_node, self.node_center, self.node_child, quadrant
             )
@@ -834,10 +856,12 @@ class FlatQuadtree:
     def _sorted_sources(self):
         """The sources' positions and charges in tree order (``perm``), kept until they change."""
         if self._sorted is None:
-            # one spare column, as Pyccel takes a (2, 1) array for a Fortran-ordered one
-            n = self.pos.shape[1]
-            spos = np.zeros((2, n + 1))
-            spos[:, :n] = self.pos[:, self.perm]
+            spos = getattr(self, "_sorted_pos", None)
+            if spos is None:
+                # one spare column: Pyccel takes a (2, 1) array for a Fortran-ordered one
+                n = self.pos.shape[1]
+                spos = np.zeros((2, n + 1))
+                spos[:, :n] = self.pos[:, self.perm]
             self._sorted = (spos, np.ascontiguousarray(self.charge[self.perm]))
         return self._sorted
 
