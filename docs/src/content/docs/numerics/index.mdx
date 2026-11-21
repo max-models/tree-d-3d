@@ -35,9 +35,11 @@ shows how they fit together.
 
 <MethodCard name="tree_d_3d.flat_tree.FlatQuadtree.evaluate" headingLevel={3} />
 
-3. **[Fast multipole method](/tree-d-3d/numerics/flat-tree/)** for line charges: a dual-tree
-   traversal pairs well-separated cells, whose multipoles become local expansions (M2L),
-   shifted down the tree (L2L) and evaluated at the particles (L2P), in $O(N)$:
+3. **[Fast multipole method](/tree-d-3d/numerics/flat-tree/)**: a dual-tree traversal pairs
+   well-separated cells, whose multipoles become local expansions (M2L), shifted down the tree
+   (L2L) and evaluated at the particles (L2P), in $O(N)$; complex expansions for line charges,
+   Cartesian ones of the softened kernel for point charges (on the CPU). `fmm_at` runs it at
+   other points, with a tree of its own over them:
 
 <MethodCard name="tree_d_3d.flat_tree.FlatQuadtree.fmm" headingLevel={3} />
 
@@ -72,10 +74,10 @@ are component-major, $(2, N)$.
 ## Not in the model
 
 - No 3D geometry or octree yet: positions, fields and trees are planar.
-- No FMM for the Coulomb kernel, no Coulomb multipoles beyond the quadrupole, no M2M (moments
-  are summed per node), no error estimate or automatic choice of $\theta$ and $p$.
-- Softening only in the direct pairs: the far cells of the log tree and the FMM are
-  unsoftened (the smooth-membership FMM has a compact softening with an exact far field).
+- No GPU version of the Coulomb FMM or of `fmm_at`; the walk keeps the Coulomb quadrupole; no
+  error estimate or automatic choice of $\theta$ and $p$.
+- For line charges, softening only in the direct pairs: the far cells of the log tree and the
+  FMM are unsoftened (the smooth-membership FMM has a compact softening with an exact far field).
 - No periodic boundaries, dielectrics or Neumann conditions; no conductor at infinity; the
   electrode system is solved directly (no FMM-accelerated GMRES); no electrodes inside
   `ElectrostaticSimulation` (pair it with `BoundaryIntegralElectrodes` by hand).

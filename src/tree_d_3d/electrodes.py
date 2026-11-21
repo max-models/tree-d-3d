@@ -67,11 +67,16 @@ FAR_POINTS: int = 2
 DIRECT_LIMIT: int = 3000
 #: Above this many target-source pairs a free-space sum walks a multipole tree.
 TREE_PAIRS: int = 4_000_000
-#: The opening angle and leaf size of the panels' multipole sums. With ``fmm_order`` 32 the
-#: error is about 2e-12 of the field, at 1.3x the speed of 0.5 with order 24 (measured on
-#: panel nodes along curves, where leaves of 16 beat 32).
-FMM_THETA: float = 0.7
+#: The opening angle and leaf size of the panels' multipole sums (`FlatQuadtree.fmm_at`).
+#: With ``fmm_order`` 32 the error is at round-off (4e-14 of the potential at 20k panels),
+#: at about half the time of a Barnes-Hut walk at 0.7 (measured on panel nodes along
+#: curves; 0.7 is 15 % faster but loses three digits).
+FMM_AT_THETA: float = 0.5
 FMM_LEAF: int = 16
+#: A sum at fewer targets than the sources over this ratio walks the tree instead, at
+#: `WALK_THETA` (error about 2e-12): the target tree does not pay for a few points.
+FMM_AT_RATIO: int = 8
+WALK_THETA: float = 0.7
 #: Consecutive panels of a conductor per block of the GMRES preconditioner.
 PRECONDITIONER_BLOCK: int = 256
 #: With a period, the fast sums map the plane by ``exp(2 pi z / period)``; they take points
@@ -257,6 +262,13 @@ def periodic_log_kernel(d, period: float) -> tuple[np.ndarray, np.ndarray]:
         ex = np.where(large, np.sign(a) * (1.0 - e * e) / tail, np.sinh(near_a) / c)
         ey = np.where(large, 2.0 * np.sin(b) * e / tail, np.sin(b) / c)
     return phi, k * np.stack((ex, ey))
+
+
+def _sum_at(tree: FlatQuadtree, points: np.ndarray, exclude):
+    """The raw sum of ``tree`` at ``points``: the FMM at many points, a walk at a few."""
+    if points.shape[1] * FMM_AT_RATIO >= tree.pos.shape[1]:
+        return tree.fmm_at(points, exclude=exclude, theta=FMM_AT_THETA)
+    return tree.evaluate(points, exclude=exclude, theta=WALK_THETA)
 
 
 class _Operator(LinearOperator):
@@ -1078,7 +1090,7 @@ class BoundaryIntegralElectrodes:
             points.T, distance_upper_bound=_TINY
         )
         exclude = np.where(distance == 0.0, nearest, -1).astype(np.int64)
-        phi_z, field_z = tree.evaluate(mapped_t, exclude=exclude, theta=FMM_THETA)
+        phi_z, field_z = _sum_at(tree, mapped_t, exclude)
         phi_z, field_z = np.asarray(phi_z), np.asarray(field_z)
         total = float(np.sum(charges))
         x_t = points[0] - self._map_x0
@@ -1121,11 +1133,11 @@ class BoundaryIntegralElectrodes:
         return phi, field
 
     def _tree_sum(self, points, sources, charges, exclude, key):
-        """A large free-space sum by a Barnes-Hut walk with ``fmm_order`` log expansions.
+        """A large free-space sum by the FMM at the points, with ``fmm_order`` terms.
 
         The tree over sources that never move (the panels' nodes, ``key``) is built
-        once and only recharged; others are built for the call. At `FMM_THETA` and the
-        default order 32 the error is about 1e-12 of the field.
+        once and only recharged; others are built for the call. At `FMM_AT_THETA` and
+        the default order 32 the error is at round-off.
         """
         tree = self._trees.get(key) if key is not None else None
         if tree is None:
@@ -1144,7 +1156,7 @@ class BoundaryIntegralElectrodes:
                 self._trees[key] = tree
         else:
             tree.set_charges(charges)
-        phi, field = tree.evaluate(points, exclude=exclude, theta=FMM_THETA)
+        phi, field = _sum_at(tree, points, exclude)
         return np.array(phi), np.array(field)
 
     def _far_sum(
@@ -1214,11 +1226,9 @@ class BoundaryIntegralElectrodes:
             tree.set_charges(sources)
 
         def walk(share: slice):
-            # a walk at the midpoints beats the FMM over every node: 2x at 21k panels
+            # the FMM at the midpoints, its target tree and lists kept between products
             targets = self._fmm_targets[share]
-            phi, _ = tree.evaluate(
-                self._fmm_plane[:, targets], exclude=targets, theta=FMM_THETA
-            )
+            phi, _ = _sum_at(tree, self._fmm_plane[:, targets], targets)
             return (np.asarray(phi),)
 
         (phi,) = self._shared(walk, self.num_panels)

@@ -7,6 +7,22 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- A fast multipole method for point charges: `FlatQuadtree.fmm` takes `kernel="coulomb"`, with
+  Cartesian expansions of the softened kernel to total degree `order` (default `COULOMB_ORDER`
+  = 4; `LOG_ORDER` = 12 stays the log kernel's default), M2M moments, M2L by a Taylor
+  recurrence, exactly antisymmetric pair forces. CPU only. `ElectrostaticSimulation`'s
+  `method="auto"` picks it for point charges at `theta < 1` on the CPU (the walk on the GPU);
+  its `order` defaults to 18 for line charges and 4 for point charges. 200k particles on one
+  core: 0.35 s against 0.79 s for the walk at theta 0.5, with half its error (1.2e-3 against
+  2.4e-3); a 50k-particle step 184 to 92 ms.
+- `FlatQuadtree.fmm_at`: the FMM at points other than the sources, with a tree of the targets
+  and a dual traversal (target and source cells), both kernels, CPU only. The target tree and
+  lists are kept for the same targets (across `set_charges`). 200k targets of 200k line charges:
+  0.45 s against 1.9 s for the walk, with a quarter of its error. The panels' sums at many
+  points (GMRES products, probes) use it (`FMM_AT_THETA` 0.5, error at round-off), sums at a
+  few points keep the walk (`FMM_AT_RATIO`): a GMRES solve at 6k panels 1.40 to 0.93 s.
+- `TREE_D_3D_FLAGS` (with cunumpy's devel branch) adds C compiler flags to the kernel builds;
+  `-march=native -ffast-math` gave 1.0-1.45x, so none are set by default.
 - Examples `diocotron_instability` and `coulomb_explosion`: physics processes with the
   evolving quadtree animated by `plasma_plots.animate_quadtree`. The diocotron example drifts
   line-charge guiding centres by the FMM and matches Davidson's growth rates of a thin

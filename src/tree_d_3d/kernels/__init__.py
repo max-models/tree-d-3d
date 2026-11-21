@@ -25,7 +25,7 @@ import cunumpy as xp
 from cunumpy.kernels import metal_available
 
 #: The build cache and launch options of every kernel folder (``TREE_D_3D_KERNEL_CACHE``,
-#: ``TREE_D_3D_OPENMP``); see `cunumpy.kernels.KernelPackage`.
+#: ``TREE_D_3D_OPENMP``, ``TREE_D_3D_FLAGS``); see `cunumpy.kernels.KernelPackage`.
 KERNEL_PACKAGE = xp.kernels.KernelPackage("tree-d-3d")
 
 #: The kernels, by name; each has a folder ``tree_d_3d.kernels.<name>``.
@@ -58,6 +58,13 @@ HOST_KERNEL_NAMES = (
     "evaluate_groups",
     "fmm_evaluate_host",
     "quadtree_build",
+    "cart_moments_upward",
+    "cart_m2l_host",
+    "cart_downward",
+    "cart_evaluate_host",
+    "dual_traverse",
+    "log_targets_host",
+    "cart_targets_host",
 )
 
 _COMPILED: bool | None = None

@@ -210,8 +210,8 @@ def test_auto_method_selection():
     tree_expected = FlatQuadtree if bh.kernels_compiled() else type(None)
     assert isinstance(make_simulation(n=20, direct_threshold=5).step(), tree_expected)
     assert make_simulation(n=20, direct_threshold=5, theta=0).step() is None
-    with pytest.raises(ValueError, match="method"):
-        make_simulation(method="fmm")
+    with pytest.raises(ValueError, match="theta"):
+        make_simulation(method="fmm", theta=1.0)
     with pytest.raises(ValueError, match="direct_threshold"):
         make_simulation(direct_threshold=-1)
 
