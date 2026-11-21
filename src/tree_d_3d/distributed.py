@@ -71,6 +71,15 @@ def total(comm: Any, value):
     return comm.allreduce(value)
 
 
+def largest(comm: Any, value: int) -> int:
+    """The largest ``value`` over the ranks."""
+    if not is_parallel(comm):
+        return value
+    from maybempi import MPI
+
+    return int(comm.allreduce(value, op=MPI.MAX))
+
+
 def block(n: int, comm: Any) -> slice:
     """This rank's contiguous share of ``range(n)``, the ranks' shares differing by one at most."""
     ranks, me = size(comm), rank(comm)

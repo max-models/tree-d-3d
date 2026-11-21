@@ -642,6 +642,7 @@ class ElectrostaticSimulation:
             kernel=self.kernel,
             order=self.order,
             symmetric=self.symmetric,
+            comm=self.comm,
         )
 
     def build_tree(self) -> FlatQuadtree:
@@ -716,14 +717,14 @@ class ElectrostaticSimulation:
         if method in ("tree", "fmm"):
             self._tree = self._make_tree(self._sources)
         charged = self.charges != 0
-        # the FMM gives the field at every source at once, which does not divide among
-        # ranks: with several, the tree is walked for this rank's particles instead
-        if method == "fmm" and not distributed.is_parallel(self.comm):
-            # The FMM yields every particle's field at once, fixed ones too.
-            if self.k_e != 0 and np.any(charged):
+        if method == "fmm":
+            # The FMM yields every particle's field at once, fixed ones too; with
+            # several ranks they share its work and each keeps its own particles.
+            if self.k_e != 0 and np.any(self._sources[1] != 0):
                 assert self._tree is not None
                 phi, field = self._tree.fmm(theta=self.theta, softening=self.softening)
-                phi, field = _host(phi), _host(field)
+                own = slice(self._sources[2], self._sources[2] + n)
+                phi, field = _host(phi)[own], _host(field)[:, own]
                 everyone = np.arange(n)
                 self._potential[:] = self.k_e * (phi + self._line_offset(everyone))
                 self._electric[:] = self.k_e * self.charges[None, :] * field

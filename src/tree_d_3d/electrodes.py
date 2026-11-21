@@ -53,6 +53,7 @@ from scipy.sparse import csc_matrix
 from scipy.sparse.linalg import LinearOperator, gmres
 from scipy.spatial import KDTree
 
+from tree_d_3d import distributed
 from tree_d_3d._profiling import _PROFILE_TAGS
 from tree_d_3d.constants import K_E
 from tree_d_3d.flat_tree import FlatQuadtree, direct_field
@@ -636,24 +637,40 @@ class BoundaryIntegralElectrodes:
         )
 
     def _build_matrix(self) -> np.ndarray:
-        """The dense ``S``: Gauss nodes for far pairs, exact segments for near ones."""
+        """The dense ``S``: Gauss nodes for far pairs, exact segments for near ones.
+
+        Each rank builds its share of the rows; every rank gets the whole matrix.
+        """
         k = self.far_points
-        matrix = np.zeros((self.num_panels, self.num_panels))
+        rows = distributed.block(self.num_panels, self.comm)
+        targets = self.midpoints[:, rows]
+        matrix = np.zeros((targets.shape[1], self.num_panels))
         for image, sign in enumerate(self._image_signs):
             nodes = self._image_nodes[image]
             for g in range(k):
                 matrix += (
                     sign
                     * self._weights[g]
-                    * self._pairwise_potential(self.midpoints, nodes[:, g::k])
+                    * self._pairwise_potential(targets, nodes[:, g::k])
                 )
         # every panel's own segment, also with near_field = 0
         target, panel, image, shift = self._near_entries()
+        mine = (target >= rows.start) & (target < rows.stop)
+        target, panel, image, shift = (
+            target[mine],
+            panel[mine],
+            image[mine],
+            shift[mine],
+        )
         correction, _ = self._near_correction(
             self.midpoints, target, panel, image, shift
         )
-        np.add.at(matrix, (target, panel), correction)
-        return matrix
+        np.add.at(matrix, (target - rows.start, panel), correction)
+        if distributed.is_parallel(self.comm):
+            matrix = distributed.gather_blocks(
+                self.comm, np.ascontiguousarray(matrix.T), self.num_panels
+            ).T
+        return np.ascontiguousarray(matrix)
 
     def _drop_shared_edges(self) -> None:
         """Remove the panel pairs where two conductors touch along an edge.
@@ -816,22 +833,29 @@ class BoundaryIntegralElectrodes:
         )
         shape = (self.num_panels, self.num_panels)
         self._correction = csc_matrix((correction, (target, panel)), shape=shape)
-        self._blocks = []
+        blocks = []
         for conductor in np.unique(self.group):
             panels = np.flatnonzero(self.group == conductor)
             for first in range(0, panels.size, PRECONDITIONER_BLOCK):
-                block = panels[first : first + PRECONDITIONER_BLOCK]
-                self._blocks.append((block, lu_factor(self._exact_block(block))))
+                blocks.append(panels[first : first + PRECONDITIONER_BLOCK])
+        # each rank factorises its share of the blocks; `_precondition` gathers
+        mine = blocks[distributed.block(len(blocks), self.comm)]
+        self._blocks = [(block, lu_factor(self._exact_block(block))) for block in mine]
+        self._block_order = np.concatenate(blocks)
         # the FMM's sources (every image's nodes) and its charge-free targets
         nodes = np.concatenate(list(self._image_nodes), axis=1)
         k = self.far_points
         if k % 2:
             # the middle node is the midpoint: it is the target, excluded from itself
             self._fmm_points = nodes
-            self._fmm_targets = np.arange(self.num_panels) * k + k // 2
+            self._fmm_targets = (np.arange(self.num_panels) * k + k // 2).astype(
+                np.int64
+            )
         else:
             self._fmm_points = np.concatenate((nodes, self.midpoints), axis=1)
-            self._fmm_targets = nodes.shape[1] + np.arange(self.num_panels)
+            self._fmm_targets = nodes.shape[1] + np.arange(
+                self.num_panels, dtype=np.int64
+            )
         # with a period the products are free-space sums over the mapped points
         self._fmm_plane = (
             self._fmm_points
@@ -866,6 +890,7 @@ class BoundaryIntegralElectrodes:
         tolerance: float = 1e-10,
         fmm_order: int = 32,
         max_iterations: int = 2000,
+        comm=None,
     ) -> None:
         if solver not in ("auto", "direct", "gmres"):
             raise ValueError("solver must be 'auto', 'direct' or 'gmres'")
@@ -882,6 +907,8 @@ class BoundaryIntegralElectrodes:
         if period is not None and face is not None and face.axis == "y":
             raise ValueError("a face normal to the periodic y axis is not supported")
         self.k_e = float(k_e)
+        #: the MPI communicator whose ranks share the work (``None``: one process)
+        self.comm = comm
         self.near_field = float(near_field)
         self.far_points = int(far_points)
         #: the period along y, ``None`` in free space
@@ -997,6 +1024,19 @@ class BoundaryIntegralElectrodes:
         self.charge: np.ndarray | None = None
         self._source_positions = np.zeros((2, 0))
         self._source_charges = np.zeros(0)
+
+    def _shared(self, function: Callable[[slice], tuple], n: int) -> tuple:
+        """``function`` of a share of ``range(n)`` per rank, its arrays gathered along the last axis.
+
+        Serially ``function(slice(0, n))``; on several ranks each evaluates its own
+        share (`distributed.block`) and every rank gets the whole result.
+        """
+        if not distributed.is_parallel(self.comm):
+            return function(slice(0, n))
+        return tuple(
+            distributed.gather_blocks(self.comm, part, n)
+            for part in function(distributed.block(n, self.comm))
+        )
 
     def _periodic_tree_sum(self, points, sources, charges, key):
         """A periodic sum as a free-space one over the mapped points.
@@ -1130,14 +1170,17 @@ class BoundaryIntegralElectrodes:
         return self._periodic_sum(points, sources, sign * charges, key=key)
 
     def _precondition(self, residual: np.ndarray) -> np.ndarray:
-        """The block-Jacobi solve (`_prepare_iterative`)."""
+        """The block-Jacobi solve (`_prepare_iterative`), each rank solving its blocks."""
+        local = [lu_solve(lu, residual[block]) for block, lu in self._blocks]
+        solved, _ = distributed.gather_columns(
+            self.comm, np.concatenate(local) if local else np.zeros(0)
+        )
         out = np.empty_like(residual)
-        for block, lu in self._blocks:
-            out[block] = lu_solve(lu, residual[block])
+        out[self._block_order] = solved
         return out
 
     def _apply(self, charge: np.ndarray) -> np.ndarray:
-        """``S @ charge`` by the FMM and the sparse near corrections."""
+        """``S @ charge`` by a multipole tree and the sparse near corrections."""
         node_charge = np.repeat(charge, self.far_points) * self._node_weights
         sources = np.concatenate(
             [sign * node_charge for sign in self._image_signs]
@@ -1158,11 +1201,20 @@ class BoundaryIntegralElectrodes:
                 kernel="log",
                 order=self.fmm_order,
                 leaf_capacity=FMM_LEAF,
+                comm=self.comm,
             )
         else:
             tree.set_charges(sources)
-        phi, _ = tree.fmm(theta=FMM_THETA)
-        phi = np.asarray(phi)[self._fmm_targets]
+
+        def walk(share: slice):
+            # a walk at the midpoints beats the FMM over every node: 2x at 21k panels
+            targets = self._fmm_targets[share]
+            phi, _ = tree.evaluate(
+                self._fmm_plane[:, targets], exclude=targets, theta=FMM_THETA
+            )
+            return (np.asarray(phi),)
+
+        (phi,) = self._shared(walk, self.num_panels)
         if self.period is not None:
             # the terms of the row kernel linear in x (`_periodic_tree_sum`); a target's
             # own node (odd far_points) is left out with its linear terms
@@ -1244,9 +1296,13 @@ class BoundaryIntegralElectrodes:
         return phi, e
 
     def _source_sum(
-        self, points: np.ndarray, exclude_self: bool = False
+        self, points: np.ndarray, first_source: int | None = None
     ) -> tuple[np.ndarray, np.ndarray]:
-        """Raw potential and field at ``points`` of the free charges and their images."""
+        """Raw potential and field at ``points`` of the free charges and their images.
+
+        ``first_source`` says the points are the free charges from that index on,
+        each skipping its own singular term (not its images).
+        """
         m = points.shape[1]
         phi = np.zeros(m)
         e = np.zeros((2, m))
@@ -1254,8 +1310,8 @@ class BoundaryIntegralElectrodes:
             return phi, e
         for image in range(len(self._image_signs)):
             exclude = (
-                np.arange(self._source_charges.size)
-                if exclude_self and image == 0
+                first_source + np.arange(m)
+                if first_source is not None and image == 0
                 else None
             )
             p, f = self._far_sum(
@@ -1295,7 +1351,9 @@ class BoundaryIntegralElectrodes:
             2, -1
         )
         self._source_charges = np.asarray(source_charges, dtype=float).ravel()
-        free_raw, _ = self._source_sum(self.midpoints)
+        free_raw, _ = self._shared(
+            lambda share: self._source_sum(self.midpoints[:, share]), self.num_panels
+        )
         rhs = (self.target_potential - self.offset) / self.k_e - free_raw
         if self.solver == "direct":
             charge = lu_solve(self._lu, rhs)
@@ -1339,6 +1397,21 @@ class BoundaryIntegralElectrodes:
             raise RuntimeError("call solve() before surface_field()")
         return 4.0 * np.pi * self.k_e * self.charge / self.lengths
 
+    def _probe(self, points: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """`probe` at ``points``, on this rank alone."""
+        assert self.charge is not None
+        holder = self.inside(points)
+        free = holder < 0
+        phi = np.empty(points.shape[1])
+        e = np.zeros((2, points.shape[1]))
+        phi[~free] = [self.conductors[k].potential for k in holder[~free]]
+        if free.any():
+            p, f = self._panel_field(points[:, free], self.charge)
+            p_s, f_s = self._source_sum(points[:, free])
+            phi[free] = self.k_e * (p + p_s) + self.offset
+            e[:, free] = self.k_e * (f + f_s)
+        return phi, e
+
     def probe(self, points) -> tuple[np.ndarray, np.ndarray]:
         """Potential (V) and field (V/m, shape ``(2, M)``) at ``points`` ``(2, M)``.
 
@@ -1353,17 +1426,9 @@ class BoundaryIntegralElectrodes:
         if self.charge is None:
             raise RuntimeError("call solve() before probe()")
         points = np.asarray(points, dtype=float).reshape(2, -1)
-        holder = self.inside(points)
-        free = holder < 0
-        phi = np.empty(points.shape[1])
-        e = np.zeros((2, points.shape[1]))
-        phi[~free] = [self.conductors[k].potential for k in holder[~free]]
-        if free.any():
-            p, f = self._panel_field(points[:, free], self.charge)
-            p_s, f_s = self._source_sum(points[:, free])
-            phi[free] = self.k_e * (p + p_s) + self.offset
-            e[:, free] = self.k_e * (f + f_s)
-        return phi, e
+        return self._shared(
+            lambda share: self._probe(points[:, share]), points.shape[1]
+        )
 
     def panel_field(self, points) -> tuple[np.ndarray, np.ndarray]:
         """Potential (V) and field (V/m) at ``points`` ``(2, M)`` of all but the free charges.
@@ -1376,13 +1441,19 @@ class BoundaryIntegralElectrodes:
         if self.charge is None:
             raise RuntimeError("call solve() before panel_field()")
         points = np.asarray(points, dtype=float).reshape(2, -1)
-        phi, e = self._panel_field(points, self.charge)
-        phi_s, e_s = self._source_sum(points)
-        phi_a, e_a = self._sources_alone(points)
-        return (
-            self.k_e * (phi + phi_s - phi_a) + self.offset,
-            self.k_e * (e + e_s - e_a),
-        )
+        charge = self.charge
+
+        def local(share: slice):
+            here = points[:, share]
+            phi, e = self._panel_field(here, charge)
+            phi_s, e_s = self._source_sum(here)
+            phi_a, e_a = self._sources_alone(here)
+            return (
+                self.k_e * (phi + phi_s - phi_a) + self.offset,
+                self.k_e * (e + e_s - e_a),
+            )
+
+        return self._shared(local, points.shape[1])
 
     def tabulate(self, lower, upper, shape) -> TabulatedField:
         """`probe` on a regular grid, for fast bilinear interpolation afterwards.
@@ -1424,9 +1495,15 @@ class BoundaryIntegralElectrodes:
         """
         if self.charge is None:
             raise RuntimeError("call solve() before force_on_sources()")
-        phi_p, e_p = self._panel_field(self._source_positions, self.charge)
-        phi_s, e_s = self._source_sum(self._source_positions, exclude_self=True)
-        return self.k_e * (phi_p + phi_s) + self.offset, self.k_e * (e_p + e_s)
+        charge = self.charge
+
+        def local(share: slice):
+            here = self._source_positions[:, share]
+            phi_p, e_p = self._panel_field(here, charge)
+            phi_s, e_s = self._source_sum(here, first_source=share.start)
+            return self.k_e * (phi_p + phi_s) + self.offset, self.k_e * (e_p + e_s)
+
+        return self._shared(local, self._source_charges.size)
 
     def total_charge(self, conductor_index: int | None = None):
         """Induced charge of one conductor, or of every conductor if ``index`` is ``None``."""
