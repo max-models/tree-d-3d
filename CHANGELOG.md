@@ -23,7 +23,17 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   few points keep the walk (`FMM_AT_RATIO`): a GMRES solve at 6k panels 1.40 to 0.93 s.
 - `TREE_D_3D_FLAGS` (with cunumpy's devel branch) adds C compiler flags to the kernel builds;
   `-march=native -ffast-math` gave 1.0-1.45x, so none are set by default.
-
+- Examples `diocotron_instability` and `coulomb_explosion`: physics processes with the
+  evolving quadtree animated by `plasma_plots.animate_quadtree`. The diocotron example drifts
+  line-charge guiding centres by the FMM and matches Davidson's growth rates of a thin
+  annulus to within 3%; the Coulomb explosion follows the exact self-similar expansion of a
+  uniform disk to 3e-4 and the wave breaking of a Gaussian cloud.
+- Examples `galaxy_collision` (Toomre-style tidal tails of a prograde disk, a retrograde one
+  intact, the cores on the two-body parabola, energy error against the opening angle),
+  `cold_collapse` (a Maclaurin disk falling in, violent relaxation to virial equilibrium,
+  and a rotating one fragmenting) and `two_stream_instability` (electron holes in phase
+  space; a periodic slab summed by the FMM after a conformal map onto an annulus; growth
+  rates against the cold-beam dispersion relation).
 - MPI: `ElectrostaticSimulation`, `BoundaryIntegralElectrodes` and `FlatQuadtree` take
   `comm=`, an MPI communicator (via maybempi, a new dependency), and agree with serial runs
   to round-off. Sources are replicated and targets distributed: every rank builds the whole
