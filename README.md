@@ -22,8 +22,9 @@ planned.
 - `FlatQuadtree`: a flat array quadtree with multipole moments. Fields
   of point charges (the 3D Coulomb kernel, `kernel="coulomb"`) or of
   line charges (the 2D Poisson kernel, `kernel="log"`) at any targets,
-  by Barnes-Hut tree walk or, for line charges, the O(N) fast multipole
-  method (`FlatQuadtree.fmm`).
+  by Barnes-Hut tree walk or the O(N) fast multipole method
+  (`FlatQuadtree.fmm` at the sources, `FlatQuadtree.fmm_at` at other
+  points; for point charges on the CPU).
 - `direct_field`: the exact all-pairs sum, for small systems and
   reference results.
 - `ElectrostaticSimulation`: time integration of `ChargedBody`

@@ -15,7 +15,7 @@ from tree_d_3d._profiling import _PROFILE_TAGS
 from tree_d_3d._utils import _check, _device, _finite, _host
 from tree_d_3d.bodies import ChargedBody
 from tree_d_3d.constants import K_E
-from tree_d_3d.flat_tree import FlatQuadtree, direct_field
+from tree_d_3d.flat_tree import COULOMB_ORDER, FlatQuadtree, direct_field
 from tree_d_3d.kernels import _kernels, kernels_compiled
 from tree_d_3d.quad import Quad
 
@@ -261,11 +261,13 @@ class ElectrostaticSimulation:
     length along z, the interaction of 2D Cartesian PIC, instead of a point
     charge in the plane. Its pair energy is ``-2 k_e q_i q_j ln(r / r_0)``
     with ``r_0 = reference_radius``, which shifts the potential energy but
-    not the forces. Line charges add ``method="fmm"``, the O(N) fast
-    multipole method of `FlatQuadtree.fmm`, which ``"auto"`` selects
-    above ``direct_threshold``. ``order`` is the number of expansion terms
-    for line charges; ``leaf_capacity`` defaults to 32 for the FMM and 8
-    otherwise.
+    not the forces. ``method="fmm"`` is the O(N) fast multipole method of
+    `FlatQuadtree.fmm`, which ``"auto"`` selects above ``direct_threshold``
+    for ``theta < 1`` (for point charges on the CPU of one process only: on the
+    GPU and on MPI ranks it walks the tree). ``order`` is the expansion order: complex terms for line charges
+    (default 18), the total degree of the Cartesian terms for point charges
+    (default `tree_d_3d.flat_tree.COULOMB_ORDER`); ``leaf_capacity`` defaults
+    to 32 for the FMM and 8 otherwise.
 
     Finite-theta forces are not pairwise symmetric: check energy and momentum
     convergence.
@@ -429,7 +431,7 @@ class ElectrostaticSimulation:
         absorbing_walls: Mapping[str, float] | None = None,
         absorbing_objects: Mapping[str, Shape] | None = None,
         kernel: str = "coulomb",
-        order: int = 18,
+        order: int | None = None,
         reference_radius: float = 1.0,
         symmetric: bool = False,
         comm=None,
@@ -451,11 +453,11 @@ class ElectrostaticSimulation:
         )
         if method not in _METHODS:
             raise ValueError(f"method must be one of {_METHODS}")
-        if method == "fmm" and kernel != "log":
-            raise ValueError("method='fmm' needs kernel='log'")
         if method == "fmm" and not 0 < theta < 1:
             raise ValueError("method='fmm' needs 0 < theta < 1")
         self.kernel = kernel
+        if order is None:
+            order = 18 if kernel == "log" else COULOMB_ORDER
         self.order = int(order)
         #: symmetric FMM truncation: exactly antisymmetric pair forces (``kernel="log"``).
         self.symmetric = bool(symmetric)
@@ -572,7 +574,12 @@ class ElectrostaticSimulation:
             return "direct"
         if not kernels_compiled():
             return "direct"
-        if self.kernel == "log" and self.theta < 1:
+        # the Coulomb FMM runs on the CPU of one process; on the GPU, and on MPI ranks
+        # (which share the walk's targets), the tree walk does
+        coulomb_fmm = xp.get_backend() != "cupy" and not collectives.is_parallel(
+            self.comm
+        )
+        if self.theta < 1 and (self.kernel == "log" or coulomb_fmm):
             return "fmm"
         return "tree"
 
@@ -752,7 +759,9 @@ class ElectrostaticSimulation:
                 phi, field = _host(phi)[own], _host(field)[:, own]
                 everyone = np.arange(n)
                 if self._potential_done:
-                    self._potential[:] = self.k_e * (phi + self._line_offset(everyone))
+                    if self.kernel == "log":
+                        phi = phi + self._line_offset(everyone)
+                    self._potential[:] = self.k_e * phi
                 self._electric[:] = self.k_e * self.charges[None, :] * field
             self._fixed_fields_done = True
             self._field_state = (
