@@ -22,6 +22,7 @@ classifiers = [
 ]
 dependencies = [
   "cunumpy>=0.7.2",
+  "maybempi>=0.1.2",
   "methodcard",
   "numpy",
   "pyccel>2.0",
