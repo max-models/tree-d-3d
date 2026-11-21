@@ -263,8 +263,8 @@ class ElectrostaticSimulation:
     with ``r_0 = reference_radius``, which shifts the potential energy but
     not the forces. ``method="fmm"`` is the O(N) fast multipole method of
     `FlatQuadtree.fmm`, which ``"auto"`` selects above ``direct_threshold``
-    for ``theta < 1`` (for point charges on the CPU only: on the GPU it walks
-    the tree). ``order`` is the expansion order: complex terms for line charges
+    for ``theta < 1`` (for point charges on the CPU of one process only: on the
+    GPU and on MPI ranks it walks the tree). ``order`` is the expansion order: complex terms for line charges
     (default 18), the total degree of the Cartesian terms for point charges
     (default `tree_d_3d.flat_tree.COULOMB_ORDER`); ``leaf_capacity`` defaults
     to 32 for the FMM and 8 otherwise.
@@ -574,8 +574,12 @@ class ElectrostaticSimulation:
             return "direct"
         if not kernels_compiled():
             return "direct"
-        # the Coulomb FMM runs on the CPU; on the GPU the tree walk does
-        if self.theta < 1 and (self.kernel == "log" or xp.get_backend() != "cupy"):
+        # the Coulomb FMM runs on the CPU of one process; on the GPU, and on MPI ranks
+        # (which share the walk's targets), the tree walk does
+        coulomb_fmm = xp.get_backend() != "cupy" and not collectives.is_parallel(
+            self.comm
+        )
+        if self.theta < 1 and (self.kernel == "log" or coulomb_fmm):
             return "fmm"
         return "tree"
 
