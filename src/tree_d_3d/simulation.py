@@ -269,6 +269,11 @@ class ElectrostaticSimulation:
 
     Finite-theta forces are not pairwise symmetric: check energy and momentum
     convergence.
+
+    ``comm``, an MPI communicator, shares the particles out over its ranks: each
+    rank passes its own bodies, gathers everyone's to build the whole tree and
+    evaluates its own (`tree_d_3d.distributed`). The diagnostics are sums over the
+    ranks, so every rank must call them.
     """
 
     def _adopt(self) -> None:

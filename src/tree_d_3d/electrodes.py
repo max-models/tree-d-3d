@@ -63,7 +63,7 @@ from tree_d_3d.quad import Quad
 NEAR_FIELD: float = 4.0
 #: Gauss--Legendre points per panel in the fast far-field sum.
 FAR_POINTS: int = 2
-#: Above this many panels ``solver="auto"`` iterates (GMRES with the FMM) instead of LU.
+#: Above this many panels ``solver="auto"`` iterates (GMRES with multipole sums) instead of LU.
 DIRECT_LIMIT: int = 3000
 #: Above this many target-source pairs a free-space sum walks a multipole tree.
 TREE_PAIRS: int = 4_000_000
@@ -485,7 +485,7 @@ def _grounded_circle_problem() -> ConvergenceProblem:
     assumptions=(
         r"a first-kind single-layer equation; straight panels of uniform charge $Q_k$ (piecewise-constant density), collocated at their midpoints $\mathbf m_k$",
         r"$G$ = `far_points` = 2 Gauss-Legendre nodes $x_g$, weights $\omega_g$, per far panel; panels within $n_\mathrm{near}$ = `near_field` = 4 of their lengths enter exactly (`segment_field`)",
-        r"$\mathsf S$ is not symmetric: up to `DIRECT_LIMIT` panels dense and LU-factorised once, $O(P^3)$, and $O(P^2)$ per `solve`; above it GMRES with a block-Jacobi preconditioner (runs of `PRECONDITIONER_BLOCK` consecutive panels) and FMM products, $O(P)$ per iteration, the iterations growing slowly with $P$",
+        r"$\mathsf S$ is not symmetric: up to `DIRECT_LIMIT` panels dense and LU-factorised once, $O(P^3)$, and $O(P^2)$ per `solve`; above it GMRES with a block-Jacobi preconditioner (runs of `PRECONDITIONER_BLOCK` consecutive panels) and multipole-tree products, $O(P)$ per iteration, the iterations growing slowly with $P$",
         r"no conductor at infinity and no constraint on the total charge: the reference length of the logarithm is the unit of length, and a lone conductor of logarithmic capacity 1 (a circle of radius 1) makes $\mathsf S$ singular",
         r"keep panels shorter than the gaps between surfaces; the order is in the panel length",
         r"with a period $P$ along $y$ the point kernel is the row sum $G_P$ (`periodic_log_kernel`) and the near panel copies, shifted by $\pm P$, enter exactly; a face $\mathsf M$ mirrors every charge about it, and the conductors' potentials are measured from a Dirichlet face's $V_\mathrm{face}$",
@@ -535,6 +535,9 @@ class BoundaryIntegralElectrodes:
     the conductors act as their union. `probe` returns the exact potential and zero
     field inside a solid conductor (`inside`), and `surface_field` the normal field
     just outside each panel.
+
+    ``comm``, an MPI communicator, shares the work out over its ranks: every rank
+    passes the same conductors, free charges and points, and gets the whole result.
     """
 
     def _near_pairs(
@@ -818,8 +821,8 @@ class BoundaryIntegralElectrodes:
     def _prepare_iterative(self) -> None:
         """The sparse near corrections and the block preconditioner of the GMRES solve.
 
-        ``S Q`` is the FMM sum over every panel's Gauss nodes (and their mirror
-        images), with the panel midpoints as charge-free targets, plus the sparse
+        ``S Q`` is a multipole-tree sum over every panel's Gauss nodes (and their
+        mirror images) at the panel midpoints, plus the sparse
         near correction ``C`` (exact segment less point terms). The preconditioner is
         block Jacobi: the exact ``S`` among each run of `PRECONDITIONER_BLOCK`
         consecutive panels of a conductor, LU-factorised once. It takes in the
@@ -842,7 +845,7 @@ class BoundaryIntegralElectrodes:
         mine = blocks[distributed.block(len(blocks), self.comm)]
         self._blocks = [(block, lu_factor(self._exact_block(block))) for block in mine]
         self._block_order = np.concatenate(blocks)
-        # the FMM's sources (every image's nodes) and its charge-free targets
+        # the tree's sources (every image's nodes) and its charge-free targets
         nodes = np.concatenate(list(self._image_nodes), axis=1)
         k = self.far_points
         if k % 2:
@@ -1005,7 +1008,7 @@ class BoundaryIntegralElectrodes:
             solver = (
                 "gmres" if mappable and self.num_panels > DIRECT_LIMIT else "direct"
             )
-        #: ``"direct"`` (dense LU) or ``"gmres"`` (FMM matrix-vector products)
+        #: ``"direct"`` (dense LU) or ``"gmres"`` (multipole-tree matrix-vector products)
         self.solver = solver
         self.tolerance = float(tolerance)
         self.fmm_order = int(fmm_order)
