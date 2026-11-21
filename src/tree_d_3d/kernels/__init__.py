@@ -62,6 +62,9 @@ HOST_KERNEL_NAMES = (
     "cart_m2l_host",
     "cart_downward",
     "cart_evaluate_host",
+    "dual_traverse",
+    "log_targets_host",
+    "cart_targets_host",
 )
 
 _COMPILED: bool | None = None

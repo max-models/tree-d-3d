@@ -1071,6 +1071,238 @@ class FlatQuadtree:
             self._cart_moments = moments
         return self._cart_moments
 
+    def _dual_lists(self, tree: FlatQuadtree, theta: float):
+        """The M2L and P2P pairs (target cell of ``tree``, source cell), as rows by target."""
+        depth = int(tree.node_depth.max()) + int(self.node_depth.max())
+        stack = np.empty((3 * depth + 8, 2), dtype=np.int64)
+        capacity = np.array([16, 8]) * (tree.node_count + self.node_count) + 64
+        counts = np.zeros(3, dtype=np.int64)
+        while True:
+            m2l = np.empty((capacity[0], 2), dtype=np.int64)
+            p2p = np.empty((capacity[1], 2), dtype=np.int64)
+            self._kernels.dual_traverse(
+                tree.node_center,
+                tree.node_half,
+                tree.node_start,
+                tree.node_end,
+                tree.node_child,
+                self.node_center,
+                self.node_half,
+                self.node_start,
+                self.node_end,
+                self.node_child,
+                theta,
+                stack,
+                m2l,
+                p2p,
+                counts,
+            )
+            if not counts[2]:
+                break
+            capacity = np.maximum(2 * capacity, counts[:2] + 64)
+        rows = []
+        for pairs, size in ((m2l, int(counts[0])), (p2p, int(counts[1]))):
+            start = np.zeros(tree.node_count + 1, dtype=np.int64)
+            partners = np.empty(max(size, 1), dtype=np.int64)
+            cursor = np.empty(tree.node_count, dtype=np.int64)
+            self._kernels.pair_csr(pairs, size, 0, start, partners, cursor)
+            rows.append((start, partners, size))
+        return rows
+
+    def _target_plan(self, targets: np.ndarray, theta: float, leaf: int):
+        """The target tree and the dual lists of `fmm_at`, kept for the same targets.
+
+        Repeated sums at the same points (the products of an iterative solver, probes
+        after `set_charges`) reuse them; any other targets replace them.
+        """
+        key = ("targets", theta, leaf)
+        cached = self._traversals.get(key)
+        if cached is not None and np.array_equal(cached[0], targets):
+            return cached[1], cached[2]
+        m = targets.shape[1]
+        lo, hi = targets.min(axis=1), targets.max(axis=1)
+        centre = 0.5 * (lo + hi)
+        half = 0.5 * float(np.max(hi - lo)) * (1 + 1e-12) + 1e-300
+        tree = FlatQuadtree(
+            targets,
+            np.zeros(m),
+            Quad(float(centre[0]), float(centre[1]), half),
+            leaf_capacity=leaf,
+            max_depth=self.max_depth,
+            kernel="coulomb",
+            compiled=self._compiled,
+        )
+        lists = self._dual_lists(tree, theta)
+        self._traversals[key] = (targets.copy(), tree, lists)
+        return tree, lists
+
+    @sp.profile("tree_d_3d.flat_tree.fmm_at", tags=_PROFILE_TAGS)
+    def fmm_at(
+        self,
+        targets,
+        *,
+        exclude=None,
+        theta: float = 0.5,
+        softening: float = 0.0,
+        potential: bool = True,
+        leaf_capacity: int | None = None,
+    ):
+        """Potential ``(M,)`` and field ``(2, M)`` at ``targets`` ``(2, M)`` by the FMM, without ``k_e``.
+
+        The fast multipole method of `fmm` at points other than the sources: the
+        targets get a tree of their own (``leaf_capacity`` per leaf, by default the
+        sources'), a dual traversal pairs its cells with the source cells (M2L where
+        ``sqrt(2) (h_t + h_s) < theta d``, exact sums between leaves otherwise), and the
+        local expansions run down the target tree to the targets. ``exclude[i]`` is a
+        source index skipped for target ``i`` (-1: none) in the exact sums;
+        ``potential=False`` returns zeros for the potential and, for line charges,
+        skips its logarithms. The conventions of `evaluate` otherwise (the log
+        kernel's expansions unsoftened), at the FMM's cost: about one M2L per target
+        cell and partner instead of one multipole term per target and cell. On the
+        CPU only.
+        """
+        theta = _finite("theta", theta, minimum=0)
+        if not 0 < theta < 1:
+            raise ValueError("FMM theta must lie in (0, 1)")
+        softening = _finite("softening", softening, minimum=0)
+        targets = _points(targets, "targets", compiled=self._compiled)
+        if not isinstance(targets, np.ndarray) or not isinstance(self.pos, np.ndarray):
+            raise NotImplementedError("fmm_at runs on the CPU (NumPy arrays)")
+        if not bool(np.all(np.isfinite(targets))):
+            raise ValueError("targets must be finite")
+        m, n = targets.shape[1], self.pos.shape[1]
+        phi, field = np.zeros(m), np.zeros((2, m))
+        if not m or not n:
+            return phi, field
+        exclude = (
+            np.full(m, -1, dtype=np.int64)
+            if exclude is None
+            else np.asarray(exclude, dtype=np.int64).reshape(-1)
+        )
+        leaf = self.leaf_capacity if leaf_capacity is None else int(leaf_capacity)
+        tree, lists = self._target_plan(targets, theta, leaf)
+        (m2l_rows, m2l_partners, n_m2l), (p2p_rows, p2p_partners, _) = lists
+        levels = np.asarray(tree.levels, dtype=np.int64)
+        k = self._kernels
+        tpos, _ = tree._sorted_sources()
+        texclude = np.ascontiguousarray(exclude[tree.perm])
+        spos, scharge = self._sorted_sources()
+        phi_sorted = np.empty(m)
+        field_sorted = np.empty((2, m + 1))
+        if self.kernel == "log":
+            order = self.order
+            local_re = np.zeros((tree.node_count, order + 1))
+            local_im = np.zeros((tree.node_count, order + 1))
+            if n_m2l:
+                k.fmm_m2l_host(
+                    m2l_rows,
+                    m2l_partners,
+                    tree.node_center,
+                    self.node_center,
+                    self.moment_re,
+                    self.moment_im,
+                    self._m2l_coefficients(),
+                    local_re,
+                    local_im,
+                )
+            scratch = np.empty(2 * order + 2)
+            for first, last in zip(levels[:-2], levels[1:-1]):
+                k.fmm_downward(
+                    int(first),
+                    int(last),
+                    tree.node_center,
+                    tree.node_child,
+                    self._binomial(),
+                    scratch,
+                    scratch.copy(),
+                    local_re,
+                    local_im,
+                )
+            k.log_targets_host(
+                tpos,
+                texclude,
+                tree.node_count,
+                tree.node_center,
+                tree.node_start,
+                tree.node_end,
+                tree.node_child,
+                local_re,
+                local_im,
+                p2p_rows,
+                p2p_partners,
+                spos,
+                scharge,
+                self.perm,
+                self.node_start,
+                self.node_end,
+                softening,
+                1 if potential else 0,
+                phi_sorted,
+                field_sorted,
+            )
+        else:
+            tables = _cartesian.tables(self.order)
+            local = np.zeros((tree.node_count, _cartesian.size(self.order)))
+            if n_m2l:
+                k.cart_m2l_host(
+                    m2l_rows,
+                    m2l_partners,
+                    tree.node_center,
+                    self.node_center,
+                    self._cartesian_moments(),
+                    softening,
+                    tables["ex"],
+                    tables["ey"],
+                    tables["rec"],
+                    tables["m2l"],
+                    tables["m2l_coef"],
+                    local,
+                )
+            k.cart_downward(
+                levels,
+                tree.node_center,
+                tree.node_child,
+                tables["mono_parent"],
+                tables["mono_dir"],
+                tables["shift"],
+                tables["shift_coef"],
+                local,
+            )
+            k.cart_targets_host(
+                tpos,
+                texclude,
+                tree.node_count,
+                tree.node_center,
+                tree.node_start,
+                tree.node_end,
+                tree.node_child,
+                local,
+                tables["mono_parent"],
+                tables["mono_dir"],
+                tables["ex"],
+                tables["ey"],
+                tables["grad"],
+                p2p_rows,
+                p2p_partners,
+                spos,
+                scharge,
+                self.perm,
+                self.node_start,
+                self.node_end,
+                softening,
+                phi_sorted,
+                field_sorted,
+            )
+        phi[tree.perm] = phi_sorted
+        field[:, tree.perm] = field_sorted[:, :m]
+        bad = np.flatnonzero(phi == 1.0e300)
+        if bad.size:
+            status = np.array([bad[0] + 1], dtype=np.int64)
+            _check(status)
+        if not potential:
+            phi[:] = 0.0
+        return phi, field
+
     def _traverse(self, theta: float):
         """The M2L and P2P node-pair lists of the dual-tree traversal, and their sizes.
 

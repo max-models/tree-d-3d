@@ -219,3 +219,64 @@ def test_coulomb_fmm_without_pyccel_and_on_a_set_charges_tree():
     np.testing.assert_allclose(
         compiled.fmm(softening=0.01)[1], fresh.fmm(softening=0.01)[1], atol=1e-12
     )
+
+
+@pytest.mark.parametrize("kernel", ["coulomb", "log"])
+def test_fmm_at_targets_matches_the_direct_sum(kernel):
+    rng = np.random.default_rng(13)
+    pos, q = cloud(4000, seed=13)
+    targets = np.concatenate((rng.uniform(-0.9, 0.9, (2, 1500)), pos[:, :500]), axis=1)
+    exclude = np.concatenate((np.full(1500, -1), np.arange(500)))
+    order = 8 if kernel == "coulomb" else 16
+    tree = FlatQuadtree(
+        pos, q, Quad(0, 0, 1), kernel=kernel, order=order, leaf_capacity=16
+    )
+    # the log kernel's expansions are unsoftened, as in the walk: compare unsoftened
+    eps = 0.01 if kernel == "coulomb" else 0.0
+    phi, field = tree.fmm_at(targets, exclude=exclude, theta=0.5, softening=eps)
+    phi_ref, ref = direct_field(
+        targets, pos, q, exclude=exclude, softening=eps, kernel=kernel
+    )
+    tolerance = 2e-4
+    assert np.max(np.abs(field - ref)) < tolerance * np.max(np.abs(ref))
+    assert np.max(np.abs(phi - phi_ref)) < tolerance * np.max(np.abs(phi_ref))
+    _, walk = tree.evaluate(targets, exclude=exclude, theta=0.5, softening=eps)
+    assert np.max(np.abs(field - walk)) < 20 * tolerance * np.max(np.abs(ref))
+    no_phi, same = tree.fmm_at(
+        targets, exclude=exclude, theta=0.5, softening=eps, potential=False
+    )
+    assert not np.any(no_phi)
+    np.testing.assert_allclose(same, field, rtol=1e-12, atol=1e-12)
+
+
+def test_fmm_at_keeps_its_plan_across_new_charges_and_matches_python():
+    rng = np.random.default_rng(14)
+    pos = rng.uniform(-0.9, 0.9, (2, 800))
+    targets = rng.uniform(-0.9, 0.9, (2, 300))
+    q, other = rng.normal(size=800), rng.normal(size=800)
+    other[:400] = 0.0  # cells without charge must not drop out of a kept plan
+    tree = FlatQuadtree(pos, q, Quad(0, 0, 1), kernel="log", leaf_capacity=8)
+    tree.fmm_at(targets)
+    tree.set_charges(other)
+    fresh = FlatQuadtree(pos, other, Quad(0, 0, 1), kernel="log", leaf_capacity=8)
+    np.testing.assert_allclose(
+        tree.fmm_at(targets)[1], fresh.fmm_at(targets)[1], rtol=1e-12, atol=1e-12
+    )
+    python = FlatQuadtree(
+        pos, other, Quad(0, 0, 1), kernel="log", leaf_capacity=8, compiled=False
+    )
+    for a, b in zip(fresh.fmm_at(targets), python.fmm_at(targets)):
+        np.testing.assert_allclose(a, b, rtol=1e-12, atol=1e-12)
+
+
+def test_fmm_at_validation():
+    pos = np.array([[0.1, 0.5], [0.2, -0.3]])
+    tree = FlatQuadtree(pos, np.ones(2), Quad(0, 0, 1))
+    with pytest.raises(ValueError, match="Coincident"):
+        tree.fmm_at(pos[:, :1])
+    phi, field = tree.fmm_at(pos[:, :1], exclude=[0])
+    _, ref = direct_field(pos[:, :1], pos, np.ones(2), exclude=[0])
+    np.testing.assert_allclose(field, ref, rtol=1e-12)
+    with pytest.raises(ValueError, match="theta"):
+        tree.fmm_at(pos, theta=1.0)
+    assert tree.fmm_at(np.zeros((2, 0)))[1].shape == (2, 0)
