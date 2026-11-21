@@ -16,7 +16,7 @@ from tree_d_3d._utils import _check, _device, _finite, _host
 from tree_d_3d.bodies import ChargedBody
 from tree_d_3d.constants import K_E
 from tree_d_3d.flat_tree import COULOMB_ORDER, FlatQuadtree, direct_field
-from tree_d_3d.kernels import _kernels, kernels_compiled
+from tree_d_3d.kernels import _kernels
 from tree_d_3d.quad import Quad
 
 if TYPE_CHECKING:
@@ -205,7 +205,7 @@ def _pair_energy_rules() -> dict:
         "energy": r"K = \frac12\sum_i m_i v_i^2, \qquad U = \frac12\sum_i q_i \phi_i",
         "momentum": r"\mathbf P = \sum_i m_i \mathbf v_i, \qquad L_z = \sum_i m_i (x_i v_{y,i} - y_i v_{x,i})",
         "absorption": r"\text{removed after a drift if } s\,(x_\mathrm{axis} - x_\mathrm{wall}) > 0, \text{ or if the chord } \mathbf r^n \to \mathbf r^{n+1} \text{ enters an object}",
-        "method": r"\texttt{auto}: \text{direct if } \theta = 0 \text{ or } N_\mathrm{charged} \le N_\mathrm{direct} \text{ (or no compiled kernels)}; \text{ else the FMM (log, } \theta < 1\text{), else the tree walk}",
+        "method": r"\texttt{auto}: \text{direct if } \theta = 0 \text{ or } N_\mathrm{charged} \le N_\mathrm{direct}; \text{ else the FMM (log, } \theta < 1\text{), else the tree walk}",
     },
     assumptions=(
         r"free space, nonrelativistic, a uniform static $B_z$; the self-field is excluded ($j \ne i$); fixed sources never move",
@@ -232,9 +232,8 @@ class ElectrostaticSimulation:
 
     ``method`` selects the field evaluation: ``"tree"`` (Barnes-Hut at
     ``theta``), ``"direct"`` (exact all-pairs sum), or ``"auto"``, which sums
-    directly for ``theta == 0``, at most ``direct_threshold`` charged
-    particles, or without the compiled kernels, where that is exact and
-    faster. Fields are cached and reused while positions, charges and
+    directly for ``theta == 0`` or at most ``direct_threshold`` charged
+    particles, where that is exact and faster. Fields are cached and reused while positions, charges and
     parameters are unchanged, so one step costs one field evaluation.
 
     ``absorbing_walls`` maps any of ``x_min``, ``x_max``, ``y_min`` and
@@ -571,8 +570,6 @@ class ElectrostaticSimulation:
             return self.method
         charged = int(np.count_nonzero(self.charges if charges is None else charges))
         if self.theta == 0 or charged <= self.direct_threshold:
-            return "direct"
-        if not kernels_compiled():
             return "direct"
         # the Coulomb FMM runs on the CPU of one process; on the GPU, and on MPI ranks
         # (which share the walk's targets), the tree walk does

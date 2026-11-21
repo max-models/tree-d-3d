@@ -53,6 +53,15 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Without Pyccel the FMM runs vectorized NumPy kernels too: the M2L translations (both
+  kernels), the upward and downward passes, the evaluation at the sources and at other
+  targets (`fmm_at`), the dual traversal and the pair lists, vectorized over cell or
+  particle pairs instead of the Pyccel loops run by the interpreter (shared pieces in
+  `tree_d_3d.kernels._vectorized`). In Pyodide, 3000 particles: `fmm` 9.1 to 0.15 s
+  (point charges) and 10.9 to 0.13 s (line charges), `fmm_at` at 500 targets 2.0-3.3 to
+  0.04 s. `ElectrostaticSimulation`'s `method="auto"` therefore no longer sums directly
+  without compiled kernels: above `direct_threshold` the FMM is faster there as well (a
+  3000-particle step in Pyodide 0.41 to 0.09 s).
 - Without Pyccel (in Pyodide, or where it fails to compile) the CPU tree walk runs a
   vectorized NumPy walk, all targets descending the tree together, instead of the Pyccel
   loops in the interpreter, and the tree is built with the level-by-level NumPy kernels: in

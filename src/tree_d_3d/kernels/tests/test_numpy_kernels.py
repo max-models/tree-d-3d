@@ -202,3 +202,118 @@ def test_evaluate_groups_flags_coincident_charges(system):
         tree = FlatQuadtree(pos, charge + 1.0, Quad(0, 0, 1))
         with pytest.raises(ValueError):
             tree.evaluate(pos[:, :3])
+
+
+@pytest.mark.parametrize("kernel", ["coulomb", "log"])
+@pytest.mark.parametrize("leaf_capacity", [1, 6])
+def test_fmm_kernels(system, kernel, leaf_capacity):
+    """The vectorized FMM kernels (moments, M2L, downward pass, evaluation at the sources
+    and at other targets) against the Pyccel ones."""
+    import cunumpy as xp
+
+    from tree_d_3d.flat_tree import FlatQuadtree
+    from tree_d_3d.quad import Quad
+
+    pos, charge = system
+    n = pos.shape[1]
+    targets = np.random.default_rng(7).uniform(-1.0, 1.0, (2, 90))
+    targets[:, :5] = pos[:, :5]
+    exclude = np.full(90, -1, dtype=np.int64)
+    exclude[:5] = np.arange(5)
+    order = 6 if kernel == "log" else 4
+    results = []
+    for implementation in ("numpy", "pyccel"):
+        with (
+            xp.use_backend("numpy"),
+            xp.kernels.use_host_kernel_implementation(implementation),
+        ):
+            tree = FlatQuadtree(
+                pos,
+                charge,
+                Quad(0, 0, 1),
+                kernel=kernel,
+                leaf_capacity=leaf_capacity,
+                order=order,
+            )
+            out = []
+            for potential in (True, False):
+                out += tree.fmm(theta=0.5, softening=0.01, potential=potential)
+            out += tree.fmm_at(targets, exclude=exclude, theta=0.5, softening=0.01)
+            for name in ("node_q", "node_qabs"):
+                out.append(getattr(tree, name))
+            results.append(out)
+    assert len(results[0]) == len(results[1]) and n
+    for a, b in zip(*results):
+        np.testing.assert_allclose(a, b, rtol=1e-10, atol=1e-10)
+
+
+@pytest.mark.parametrize("name", ["fmm_evaluate_host", "cart_evaluate_host"])
+def test_fmm_evaluation_flags_coincident_charges(system, name):
+    """A leaf pair with two coincident, unsoftened charges sets ``status``."""
+    import cunumpy as xp
+
+    from tree_d_3d.flat_tree import FlatQuadtree
+    from tree_d_3d.quad import Quad
+
+    pos, charge = system
+    pos = pos.copy()
+    pos[:, 3] = pos[:, 4]
+    kernel = "log" if name == "fmm_evaluate_host" else "coulomb"
+    with (
+        xp.use_backend("numpy"),
+        xp.kernels.use_host_kernel_implementation("numpy"),
+    ):
+        tree = FlatQuadtree(pos, charge + 2.0, Quad(0, 0, 1), kernel=kernel)
+        with pytest.raises(ValueError):
+            tree.fmm(theta=0.5)
+
+
+@pytest.mark.parametrize("mutual", [0, 1])
+def test_pair_csr(mutual):
+    pairs = np.random.default_rng(3).integers(0, 9, (40, 2)).astype(np.int64)
+    pairs[::7, 1] = pairs[::7, 0]
+    results = []
+    for kernel in _versions("pair_csr"):
+        row_start = np.zeros(10, dtype=np.int64)
+        partner = np.full(80, -1, dtype=np.int64)
+        kernel(pairs, 37, mutual, row_start, partner, np.empty(9, dtype=np.int64))
+        results.append((row_start, partner))
+    np.testing.assert_array_equal(results[0][0], results[1][0])
+    np.testing.assert_array_equal(results[0][1], results[1][1])
+
+
+def test_dual_traverse_finds_the_same_pairs(system):
+    """Breadth first instead of depth first: the same M2L and P2P pairs."""
+    import cunumpy as xp
+
+    from tree_d_3d.flat_tree import FlatQuadtree
+    from tree_d_3d.quad import Quad
+
+    pos, charge = system
+    with xp.use_backend("numpy"):
+        sources = FlatQuadtree(pos, charge, Quad(0, 0, 1), leaf_capacity=4)
+        targets = FlatQuadtree(pos[:, :100] * 0.7, charge[:100], Quad(0, 0, 1))
+    trees = [
+        getattr(tree, name)
+        for tree in (targets, sources)
+        for name in ("node_center", "node_half", "node_start", "node_end", "node_child")
+    ]
+    lists = []
+    for kernel in _versions("dual_traverse"):
+        m2l = np.empty((4000, 2), dtype=np.int64)
+        p2p = np.empty((4000, 2), dtype=np.int64)
+        counts = np.zeros(3, dtype=np.int64)
+        stack = np.empty((200, 2), dtype=np.int64)
+        kernel(*trees, 0.6, stack, m2l, p2p, counts)
+        assert counts[2] == 0
+        lists.append(
+            [
+                sorted(map(tuple, m2l[: counts[0]])),
+                sorted(map(tuple, p2p[: counts[1]])),
+            ]
+        )
+    assert lists[0] == lists[1]
+    # a list that is too short is reported, with the sizes needed
+    counts = np.zeros(3, dtype=np.int64)
+    _versions("dual_traverse")[0](*trees, 0.6, stack, m2l[:3], p2p[:3], counts)
+    assert counts[2] == 1 and counts[0] == len(lists[0][0])

@@ -118,8 +118,8 @@ def kernels_compiled() -> bool:
     """Whether the kernels run compiled.
 
     On the CuPy backend they always do (CUDA); otherwise this checks once per
-    process whether the Pyccel versions compile. Without them the tree kernels
-    run as Python loops, so ``method="auto"`` sums directly.
+    process whether the Pyccel versions compile. Without them (e.g. in Pyodide)
+    the vectorized NumPy versions run.
     """
     global _COMPILED
     if xp.get_backend() == "cupy":
@@ -134,7 +134,7 @@ def kernels_compiled() -> bool:
         if failed:
             warnings.warn(
                 f"Barnes-Hut kernels {failed} could not be compiled; their NumPy "
-                "versions run instead (the tree kernels as Python loops)",
+                "versions run instead",
                 RuntimeWarning,
                 stacklevel=2,
             )
