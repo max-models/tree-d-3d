@@ -7,6 +7,11 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Examples `diocotron_instability` and `coulomb_explosion`: physics processes with the
+  evolving quadtree animated by `plasma_plots.animate_quadtree`. The diocotron example drifts
+  line-charge guiding centres by the FMM and matches Davidson's growth rates of a thin
+  annulus to within 3%; the Coulomb explosion follows the exact self-similar expansion of a
+  uniform disk to 3e-4 and the wave breaking of a Gaussian cloud.
 - MPI: `ElectrostaticSimulation`, `BoundaryIntegralElectrodes` and `FlatQuadtree` take
   `comm=`, an MPI communicator (via maybempi, a new dependency), and agree with serial runs
   to round-off. Sources are replicated and targets distributed: every rank builds the whole
