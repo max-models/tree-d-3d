@@ -34,6 +34,7 @@ import numpy as np
 import scope_profiler as sp
 from methodcard import ConvergenceProblem, Rule, method
 
+from tree_d_3d import distributed
 from tree_d_3d._profiling import _PROFILE_TAGS
 from tree_d_3d._utils import _check, _device, _finite, _host, _points
 from tree_d_3d.constants import K_E
@@ -409,6 +410,10 @@ class FlatQuadtree:
     ``2 k_e q r / r**2``. It uses complex multipole expansions of ``order``
     terms, so accuracy can be raised by raising ``order`` as well as by
     lowering ``theta``.
+
+    ``comm`` (an MPI communicator) shares the cells' moments out over its ranks,
+    each summing a run of cells with an even share of the particles; every rank
+    passes the same particles and gets the whole tree.
     """
 
     def _empty(self, root_quad: Quad) -> None:
@@ -557,55 +562,87 @@ class FlatQuadtree:
         self.levels = np.asarray(levels)
         return hi
 
+    def _share(self, work) -> slice:
+        """This rank's contiguous run of items with about an even share of ``work``."""
+        work = np.asarray(_host(work), dtype=float)
+        if not distributed.is_parallel(self.comm):
+            return slice(0, work.size)
+        ranks, me = distributed.size(self.comm), distributed.rank(self.comm)
+        cumulative = np.cumsum(work)
+        total = cumulative[-1] if work.size else 0.0
+        cuts = np.searchsorted(cumulative, total * np.arange(1, ranks) / ranks)
+        bounds = np.concatenate(([0], cuts, [work.size]))
+        return slice(int(bounds[me]), int(bounds[me + 1]))
+
+    def _moment_share(self) -> slice:
+        """This rank's run of cells, holding about an even share of the particle visits."""
+        return self._share(self.node_end - self.node_start)
+
+    def _gather_moments(self, share: slice, outputs: tuple) -> None:
+        """Fill ``outputs`` (per-cell arrays) on every rank from each rank's ``share``."""
+        if not distributed.is_parallel(self.comm):
+            return
+        columns = [np.asarray(out).reshape(self.node_count, -1) for out in outputs]
+        mine = np.concatenate([c[share] for c in columns], axis=1)
+        gathered, _ = distributed.gather_columns(self.comm, mine.T)
+        first = 0
+        for out, column in zip(outputs, columns):
+            width = column.shape[1]
+            out[...] = gathered[first : first + width].T.reshape(out.shape)
+            first += width
+
     def _moments(self) -> None:
-        """The cells' charges and multipole moments from ``self.charge``."""
+        """The cells' charges and multipole moments from ``self.charge``.
+
+        Each cell sums its own particles, so with ``comm`` every rank sums its run
+        of cells (`_moment_share`) and the ranks gather the others'.
+        """
         count = self.node_count
         kernel = self.kernel
+        share = self._moment_share()
         with sp.region("tree_d_3d.flat_tree.moments", tags=_PROFILE_TAGS):
             self.node_q = self._xp.empty(count)
             self.node_qabs = self._xp.empty(count)
             self.node_p = self._xp.empty((count, 2))
             self.node_s = self._xp.empty((count, 3))
-            if kernel == "log":
-                self.moment_re = self._xp.empty((count, self.order + 1))
-                self.moment_im = self._xp.empty((count, self.order + 1))
-                self._kernels.log_quadtree_moments(
-                    self.pos,
-                    self.charge,
-                    self.perm,
-                    count,
-                    self.node_center,
-                    self.node_start,
-                    self.node_end,
-                    self.node_qabs,
-                    self.moment_re,
-                    self.moment_im,
-                    n_threads=count,
-                )
-                self.node_q[:] = self.moment_re[:, 0]
-                self.node_p[:, 0] = self.moment_re[:, 1]
-                self.node_p[:, 1] = self.moment_im[:, 1]
-                self._stack = self._xp.empty(
-                    3 * int(self.node_depth.max()) + 8, dtype=np.int64
-                )
-                return
-            self._kernels.quadtree_moments(
-                self.pos,
-                self.charge,
-                self.perm,
-                count,
-                self.node_center,
-                self.node_start,
-                self.node_end,
-                self.node_q,
-                self.node_qabs,
-                self.node_p,
-                self.node_s,
-                n_threads=count,
-            )
             self._stack = self._xp.empty(
                 3 * int(self.node_depth.max()) + 8, dtype=np.int64
             )
+            if kernel == "log":
+                self.moment_re = self._xp.empty((count, self.order + 1))
+                self.moment_im = self._xp.empty((count, self.order + 1))
+                outputs = (self.node_qabs, self.moment_re, self.moment_im)
+                if share.stop > share.start:
+                    self._kernels.log_quadtree_moments(
+                        self.pos,
+                        self.charge,
+                        self.perm,
+                        share.stop - share.start,
+                        self.node_center[share],
+                        self.node_start[share],
+                        self.node_end[share],
+                        *(out[share] for out in outputs),
+                        n_threads=share.stop - share.start,
+                    )
+                self._gather_moments(share, outputs)
+                self.node_q[:] = self.moment_re[:, 0]
+                self.node_p[:, 0] = self.moment_re[:, 1]
+                self.node_p[:, 1] = self.moment_im[:, 1]
+                return
+            outputs = (self.node_q, self.node_qabs, self.node_p, self.node_s)
+            if share.stop > share.start:
+                self._kernels.quadtree_moments(
+                    self.pos,
+                    self.charge,
+                    self.perm,
+                    share.stop - share.start,
+                    self.node_center[share],
+                    self.node_start[share],
+                    self.node_end[share],
+                    *(out[share] for out in outputs),
+                    n_threads=share.stop - share.start,
+                )
+            self._gather_moments(share, outputs)
 
     def __init__(
         self,
@@ -619,6 +656,7 @@ class FlatQuadtree:
         kernel: str = "coulomb",
         order: int = 12,
         symmetric: bool = False,
+        comm=None,
     ) -> None:
         if kernel not in _KERNELS:
             raise ValueError(f"kernel must be one of {_KERNELS}")
@@ -628,6 +666,8 @@ class FlatQuadtree:
             raise ValueError(f"order must be at most {MAX_ORDER}, got {order}")
         self.kernel = kernel
         self.order = int(order)
+        #: the MPI communicator whose ranks share the moments (``None``: one process)
+        self.comm = comm if compiled else None
         #: FMM translations truncated by total degree (exact pair antisymmetry).
         self.symmetric = bool(symmetric)
         self._compiled = bool(compiled)
@@ -664,6 +704,29 @@ class FlatQuadtree:
                 setattr(self, name, getattr(self, name)[:count].copy())
         self._traversals: dict = {}
         self._moments()
+
+    def _fmm_shares(self, theta: float) -> tuple[slice, slice, slice]:
+        """This rank's M2L pairs, leaves (for L2P) and P2P pairs, each an even share."""
+        m2l, p2p, sizes = self._traversals[theta]
+        if not distributed.is_parallel(self.comm):
+            return (
+                slice(0, int(sizes[0])),
+                slice(0, self.node_count),
+                slice(0, int(sizes[1])),
+            )
+        key = ("shares", theta)
+        if key not in self._traversals:
+            counts = _host(self.node_end - self.node_start)
+            leaves = np.where(_host(self.node_child) < 0, counts, 0)
+            pairs = _host(p2p[: int(sizes[1])])
+            a, b = counts[pairs[:, 0]], counts[pairs[:, 1]]
+            near = np.where(pairs[:, 0] == pairs[:, 1], 0.5 * a * a, a * b)
+            self._traversals[key] = (
+                self._share(np.ones(int(sizes[0]))),
+                self._share(leaves),
+                self._share(near),
+            )
+        return self._traversals[key]
 
     def set_charges(self, charges) -> None:
         """New charges ``(N,)`` for the same particles, without rebuilding the tree.
@@ -884,20 +947,27 @@ class FlatQuadtree:
         local_im = self._xp.zeros((count, order + 1))
         scratch_re = self._xp.empty(2 * order + 2)
         scratch_im = self._xp.empty(2 * order + 2)
-        k.fmm_m2l(
-            m2l,
-            int(sizes[0]),
-            self.node_center,
-            self.moment_re,
-            self.moment_im,
-            binomial,
-            1 if self.symmetric else 0,
-            scratch_re,
-            scratch_im,
-            local_re,
-            local_im,
-            n_threads=max(int(sizes[0]), 1),
-        )
+        # each rank takes a share of the M2L pairs, the leaves and the P2P pairs; the
+        # expansions and fields are sums, completed by an allreduce
+        m2l_share, leaf_share, p2p_share = self._fmm_shares(theta)
+        if m2l_share.stop > m2l_share.start:
+            k.fmm_m2l(
+                m2l[m2l_share],
+                m2l_share.stop - m2l_share.start,
+                self.node_center,
+                self.moment_re,
+                self.moment_im,
+                binomial,
+                1 if self.symmetric else 0,
+                scratch_re,
+                scratch_im,
+                local_re,
+                local_im,
+                n_threads=max(m2l_share.stop - m2l_share.start, 1),
+            )
+        if distributed.is_parallel(self.comm):
+            local_re = distributed.total(self.comm, local_re)
+            local_im = distributed.total(self.comm, local_im)
         for lo, hi in zip(self.levels[:-2], self.levels[1:-1]):
             k.fmm_downward(
                 int(lo),
@@ -912,26 +982,58 @@ class FlatQuadtree:
                 n_threads=int(hi - lo),
             )
         status = self._xp.zeros(1, dtype=np.int64)
-        k.fmm_evaluate(
-            self.pos,
-            self.charge,
-            self.perm,
-            count,
-            self.node_center,
-            self.node_start,
-            self.node_end,
-            self.node_child,
-            local_re,
-            local_im,
-            p2p,
-            int(sizes[1]),
-            softening,
-            1 if potential else 0,
-            phi,
-            field,
-            status,
-            n_threads=max(count, int(sizes[1])),
-        )
+        if not distributed.is_parallel(self.comm):
+            k.fmm_evaluate(
+                self.pos,
+                self.charge,
+                self.perm,
+                count,
+                self.node_center,
+                self.node_start,
+                self.node_end,
+                self.node_child,
+                local_re,
+                local_im,
+                p2p,
+                int(sizes[1]),
+                softening,
+                1 if potential else 0,
+                phi,
+                field,
+                status,
+                n_threads=max(count, int(sizes[1])),
+            )
+        else:
+            leaves, near = leaf_share, p2p_share
+            # this rank's leaves (L2P, no pairs), then its pairs (P2P, no leaves)
+            for nodes, pairs in ((leaves, slice(0, 0)), (slice(0, 0), near)):
+                if nodes.stop == nodes.start and pairs.stop == pairs.start:
+                    continue  # Pyccel rejects zero-length arrays
+                k.fmm_evaluate(
+                    self.pos,
+                    self.charge,
+                    self.perm,
+                    nodes.stop - nodes.start,
+                    self.node_center[nodes.start :],
+                    self.node_start[nodes.start :],
+                    self.node_end[nodes.start :],
+                    self.node_child[nodes.start :],
+                    local_re[nodes.start :],
+                    local_im[nodes.start :],
+                    p2p[pairs.start :],
+                    pairs.stop - pairs.start,
+                    softening,
+                    1 if potential else 0,
+                    phi,
+                    field,
+                    status,
+                    n_threads=max(
+                        nodes.stop - nodes.start, pairs.stop - pairs.start, 1
+                    ),
+                )
+            phi = distributed.total(self.comm, phi)
+            field = distributed.total(self.comm, field)
+            status[0] = distributed.largest(self.comm, int(status[0]))
         _check(status)
         self.fmm_pairs = (int(sizes[0]), int(sizes[1]))
         return phi, field

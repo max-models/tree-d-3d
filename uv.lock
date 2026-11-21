@@ -4761,6 +4761,7 @@ version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "cunumpy" },
+    { name = "maybempi" },
     { name = "methodcard" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
@@ -4828,6 +4829,7 @@ requires-dist = [
     { name = "ipykernel", marker = "extra == 'docs'" },
     { name = "jupyterlab", marker = "extra == 'dev'" },
     { name = "kaleido", marker = "extra == 'docs'" },
+    { name = "maybempi", specifier = ">=0.1.2" },
     { name = "methodcard", git = "https://github.com/max-models/methodcard?branch=devel" },
     { name = "methodcard", extras = ["symbolic"], marker = "extra == 'test'", git = "https://github.com/max-models/methodcard?branch=devel" },
     { name = "mlx", marker = "platform_machine == 'arm64' and sys_platform == 'darwin' and extra == 'metal'" },

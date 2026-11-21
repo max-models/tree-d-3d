@@ -10,6 +10,7 @@ import numpy as np
 import scope_profiler as sp
 from methodcard import ConvergenceProblem, Rule, method
 
+from tree_d_3d import distributed
 from tree_d_3d._profiling import _PROFILE_TAGS
 from tree_d_3d._utils import _check, _device, _finite, _host
 from tree_d_3d.bodies import ChargedBody
@@ -268,6 +269,11 @@ class ElectrostaticSimulation:
 
     Finite-theta forces are not pairwise symmetric: check energy and momentum
     convergence.
+
+    ``comm``, an MPI communicator, shares the particles out over its ranks: each
+    rank passes its own bodies, gathers everyone's to build the whole tree and
+    evaluates its own (`tree_d_3d.distributed`). The diagnostics are sums over the
+    ranks, so every rank must call them.
     """
 
     def _adopt(self) -> None:
@@ -297,6 +303,7 @@ class ElectrostaticSimulation:
         self._electric = np.zeros((2, n))
         self._potential = np.zeros(n)
         self._field_state = None
+        self._sources = None
         self._fixed_fields_done = False
         self._tree = None
 
@@ -424,8 +431,11 @@ class ElectrostaticSimulation:
         order: int = 18,
         reference_radius: float = 1.0,
         symmetric: bool = False,
+        comm=None,
     ) -> None:
         self.bodies = list(bodies)
+        #: the MPI communicator over which the particles are shared out (``None``: one process)
+        self.comm = comm
         if len({id(b) for b in self.bodies}) != len(self.bodies):
             raise ValueError("Each particle must be a distinct object")
         FlatQuadtree(
@@ -549,12 +559,14 @@ class ElectrostaticSimulation:
         self._electric = np.ascontiguousarray(self._electric[:, keep])
         self._potential = self._potential[keep]
         self._field_state = None
+        self._sources = None
         self._tree = None
 
-    def _resolve_method(self) -> str:
+    def _resolve_method(self, charges: np.ndarray | None = None) -> str:
+        """The field method; ``charges`` are all ranks' (default: this rank's)."""
         if self.method != "auto":
             return self.method
-        charged = int(np.count_nonzero(self.charges))
+        charged = int(np.count_nonzero(self.charges if charges is None else charges))
         if self.theta == 0 or charged <= self.direct_threshold:
             return "direct"
         if not kernels_compiled():
@@ -578,24 +590,42 @@ class ElectrostaticSimulation:
         )
 
     def _fields_current(self) -> bool:
-        if self._field_state is None:
-            return False
-        pos, charge, fixed, params = self._field_state
-        return (
-            params == self._parameters()
-            and np.array_equal(pos, self.positions)
-            and np.array_equal(charge, self.charges)
-            and np.array_equal(fixed, self.fixed)
-        )
+        """Whether the cached fields still hold: on every rank, since all ranks' particles act."""
+        state = self._field_state
+        current = state is not None
+        if state is not None:
+            pos, charge, fixed, params = state
+            current = (
+                params == self._parameters()
+                and np.array_equal(pos, self.positions)
+                and np.array_equal(charge, self.charges)
+                and np.array_equal(fixed, self.fixed)
+            )
+        if distributed.is_parallel(self.comm):
+            return distributed.total(self.comm, int(not current)) == 0
+        return current
 
-    def _expand_bounds(self) -> None:
-        if not self.num_particles:
+    def _all_sources(self) -> tuple[np.ndarray, np.ndarray, int]:
+        """Every rank's positions and charges, and the index of this rank's first particle.
+
+        With one process, the particles themselves. Every rank gets the same arrays, so
+        every rank builds the same tree (`tree_d_3d.distributed`).
+        """
+        if not distributed.is_parallel(self.comm):
+            return self.positions, self.charges, 0
+        positions, offset = distributed.gather_columns(self.comm, self.positions)
+        charges, _ = distributed.gather_columns(self.comm, self.charges)
+        return positions, charges, offset
+
+    def _expand_bounds(self, points: np.ndarray | None = None) -> None:
+        points = self.positions if points is None else points
+        if not points.shape[1]:
             return
-        if not np.all(np.isfinite(self.positions)):
+        if not np.all(np.isfinite(points)):
             raise ValueError("Particle positions must be finite; reduce dt")
         b = self.bounds
-        lo = np.minimum(self.positions.min(axis=1), [b.xmid - b.half, b.ymid - b.half])
-        hi = np.maximum(self.positions.max(axis=1), [b.xmid + b.half, b.ymid + b.half])
+        lo = np.minimum(points.min(axis=1), [b.xmid - b.half, b.ymid - b.half])
+        hi = np.maximum(points.max(axis=1), [b.xmid + b.half, b.ymid + b.half])
         if np.any(lo < (b.xmid - b.half, b.ymid - b.half)) or np.any(
             hi > (b.xmid + b.half, b.ymid + b.half)
         ):
@@ -603,48 +633,60 @@ class ElectrostaticSimulation:
             half = np.max(hi / 2 - lo / 2) * (1 + 1e-12)
             self.bounds = Quad(float(center[0]), float(center[1]), float(half))
 
-    def build_tree(self) -> FlatQuadtree:
-        """Build a tree, enlarging its extent without dropping particles."""
-        if len(self.bodies) != self.num_particles:
-            self._adopt()
-        self._expand_bounds()
+    def _make_tree(self, sources) -> FlatQuadtree:
+        positions, charges, _ = sources
         leaf = self.leaf_capacity
         if leaf is None:
-            leaf = 32 if self._resolve_method() == "fmm" else 8
+            leaf = 32 if self._resolve_method(charges) == "fmm" else 8
         return FlatQuadtree(
-            self.positions,
-            self.charges,
+            positions,
+            charges,
             self.bounds,
             leaf_capacity=leaf,
             max_depth=self.max_depth,
             kernel=self.kernel,
             order=self.order,
             symmetric=self.symmetric,
+            comm=self.comm,
         )
+
+    def build_tree(self) -> FlatQuadtree:
+        """Build a tree, enlarging its extent without dropping particles.
+
+        With a communicator, the tree of every rank's particles (collective).
+        """
+        if len(self.bodies) != self.num_particles:
+            self._adopt()
+        sources = self._all_sources()
+        self._expand_bounds(sources[0])
+        return self._make_tree(sources)
 
     def _line_offset(self, targets: np.ndarray) -> np.ndarray:
         """Raw-potential shift for the line-charge reference radius r_0."""
-        others = np.sum(self.charges) - self.charges[targets]
+        everyone = self._sources[1] if self._sources is not None else self.charges
+        others = np.sum(everyone) - self.charges[targets]
         return 2 * np.log(self.reference_radius) * others
 
     def _evaluate_targets(self, targets: np.ndarray) -> None:
         """Fill the cached force and potential at ``targets``."""
         if self.k_e == 0 or not len(targets):
             return
+        assert self._sources is not None  # set by compute_fields
+        positions, charges, offset = self._sources
         if self._tree is not None:
             phi, field = self._tree.evaluate(
                 self.positions[:, targets],
-                exclude=targets,
+                exclude=offset + targets,
                 theta=self.theta,
                 softening=self.softening,
             )
         else:
             phi, field = direct_field(
                 self.positions[:, targets],
-                self.positions,
-                self.charges,
+                positions,
+                charges,
                 softening=self.softening,
-                exclude=targets,
+                exclude=offset + targets,
                 kernel=self.kernel,
             )
         phi, field = _host(phi), _host(field)
@@ -670,21 +712,24 @@ class ElectrostaticSimulation:
                 self._evaluate_targets(np.flatnonzero(self.charges * self.fixed))
                 self._fixed_fields_done = True
             return self._tree
-        self._expand_bounds()
+        self._sources = self._all_sources()
+        self._expand_bounds(self._sources[0])
         n = self.num_particles
         self._electric = np.zeros((2, n))
         self._potential = np.zeros(n)
         self._tree = None
-        method = self._resolve_method()
+        method = self._resolve_method(self._sources[1])
         if method in ("tree", "fmm"):
-            self._tree = self.build_tree()
+            self._tree = self._make_tree(self._sources)
         charged = self.charges != 0
         if method == "fmm":
-            # The FMM yields every particle's field at once, fixed ones too.
-            if self.k_e != 0 and np.any(charged):
+            # The FMM yields every particle's field at once, fixed ones too; with
+            # several ranks they share its work and each keeps its own particles.
+            if self.k_e != 0 and np.any(self._sources[1] != 0):
                 assert self._tree is not None
                 phi, field = self._tree.fmm(theta=self.theta, softening=self.softening)
-                phi, field = _host(phi), _host(field)
+                own = slice(self._sources[2], self._sources[2] + n)
+                phi, field = _host(phi)[own], _host(field)[:, own]
                 everyone = np.arange(n)
                 self._potential[:] = self.k_e * (phi + self._line_offset(everyone))
                 self._electric[:] = self.k_e * self.charges[None, :] * field
@@ -763,7 +808,8 @@ class ElectrostaticSimulation:
         return tree
 
     def get_kinetic_energy(self) -> float:
-        return float(0.5 * np.sum(self.masses * np.sum(self.velocities**2, axis=0)))
+        local = float(0.5 * np.sum(self.masses * np.sum(self.velocities**2, axis=0)))
+        return float(distributed.total(self.comm, local))
 
     @method(
         equations={
@@ -785,7 +831,32 @@ class ElectrostaticSimulation:
         fields are summed directly, and accurate to the tree error otherwise.
         ``exact=True`` sums all pairs, which costs O(N squared).
         """
-        if self.k_e == 0 or not len(self.bodies):
+        if self.k_e == 0:
+            return 0.0
+        if distributed.is_parallel(self.comm):
+            # collective: every rank takes part, with or without particles of its own
+            if not exact:
+                self.compute_fields()
+                local = float(0.5 * self.charges @ self._potential)
+            else:
+                positions, charges, offset = self._all_sources()
+                mine = offset + np.arange(self.num_particles)
+                phi, _ = direct_field(
+                    self.positions,
+                    positions,
+                    charges,
+                    softening=self.softening,
+                    exclude=mine,
+                    kernel=self.kernel,
+                )
+                phi = _host(phi)
+                if self.kernel == "log":
+                    phi = phi + 2 * np.log(self.reference_radius) * (
+                        np.sum(charges) - self.charges
+                    )
+                local = float(0.5 * self.k_e * self.charges @ phi)
+            return float(distributed.total(self.comm, local))
+        if not len(self.bodies):
             return 0.0
         if not exact:
             self.compute_fields()
@@ -818,19 +889,22 @@ class ElectrostaticSimulation:
         return self.get_kinetic_energy() + self.get_potential_energy(exact)
 
     def get_total_charge(self) -> float:
-        return float(np.sum(self.charges))
+        return float(distributed.total(self.comm, float(np.sum(self.charges))))
 
     def get_center_of_mass(self) -> np.ndarray:
-        mass = np.sum(self.masses)
-        if not mass:
+        local = np.append(self.positions @ self.masses, np.sum(self.masses))
+        weighted = distributed.total(self.comm, local)
+        if not weighted[2]:
             return np.zeros(2)
-        return self.positions @ self.masses / mass
+        return weighted[:2] / weighted[2]
 
     def get_momentum(self) -> np.ndarray:
-        return self.velocities @ self.masses if len(self.masses) else np.zeros(2)
+        local = self.velocities @ self.masses if len(self.masses) else np.zeros(2)
+        return distributed.total(self.comm, np.asarray(local, dtype=float))
 
     def get_angular_momentum(self) -> float:
         """Mechanical angular momentum about the origin (z component)."""
         x, y = self.positions
         vx, vy = self.velocities
-        return float(np.sum(self.masses * (x * vy - y * vx)))
+        local = float(np.sum(self.masses * (x * vy - y * vx)))
+        return float(distributed.total(self.comm, local))

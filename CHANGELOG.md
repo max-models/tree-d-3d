@@ -5,8 +5,21 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- MPI: `ElectrostaticSimulation`, `BoundaryIntegralElectrodes` and `FlatQuadtree` take
+  `comm=`, an MPI communicator (via maybempi, a new dependency), and agree with serial runs
+  to round-off. Sources are replicated and targets distributed: every rank builds the whole
+  tree from the gathered particles and evaluates its own. The tree moments, the FMM's pair
+  lists, probes, panel sums, the preconditioner blocks and the dense-matrix rows are split
+  over the ranks. At 4 ranks on 4 cores, a 400k-particle step runs 2.5x (FMM) to 3.5x (tree)
+  faster, 100k probes 2.9-3.4x and a 21k-panel GMRES solve 2.2x faster
+  ("Parallel runs" in the docs). New module `tree_d_3d.distributed`.
+
 ### Changed
 
+- GMRES products walk the panels' tree at the midpoints instead of running the FMM over
+  every Gauss node: 0.11 instead of 0.17 s per product at 21k panels on one core.
 - Faster panel solves and sums (measured on a 4-core CPU, 3 runs each):
   - GMRES keeps one FMM tree per geometry and only recharges it (`FlatQuadtree.set_charges`,
     interaction lists cached per opening angle), and is preconditioned by the exact panel

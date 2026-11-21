@@ -38,6 +38,7 @@ export default defineDocs({
 			items: [
 				{ label: 'Installation', slug: 'getting-started/installation' },
 				{ label: 'Quickstart', slug: 'getting-started/quickstart' },
+				{ label: 'Parallel runs', slug: 'getting-started/mpi' },
 			],
 		},
 		{
