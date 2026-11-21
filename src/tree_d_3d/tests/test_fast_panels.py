@@ -51,8 +51,8 @@ def test_auto_iterates_above_the_limit(monkeypatch):
     assert BoundaryIntegralElectrodes(conductors).solver == "direct"
     monkeypatch.setattr(electrodes_module, "DIRECT_LIMIT", 100)
     assert BoundaryIntegralElectrodes(conductors).solver == "gmres"
-    # never with a period
-    assert BoundaryIntegralElectrodes(conductors, period=10.0).solver == "direct"
+    # with a period too, while the conductors fit the periodic map
+    assert BoundaryIntegralElectrodes(conductors, period=10.0).solver == "gmres"
 
 
 def test_unconverged_solves_and_invalid_options_raise():
@@ -64,7 +64,62 @@ def test_unconverged_solves_and_invalid_options_raise():
         electrodes.solve()
     with pytest.raises(ValueError, match="solver"):
         BoundaryIntegralElectrodes(conductors, solver="fmm")
-    with pytest.raises(ValueError, match="period"):
-        BoundaryIntegralElectrodes(conductors, solver="gmres", period=10.0)
+    far = Circle(midpoint=(100.0, 0.0), radius=1.0)
+    with pytest.raises(ValueError, match="periods along x"):
+        BoundaryIntegralElectrodes(
+            conductors + conductors_from_shape(far, 0.0, 0.5),
+            solver="gmres",
+            period=1.0,
+        )
     with pytest.raises(ValueError, match="tolerance"):
         BoundaryIntegralElectrodes(conductors, tolerance=0.0)
+
+
+def test_tree_probes_match_the_direct_sum(monkeypatch):
+    conductors = _geometry(0.03)
+    electrodes = BoundaryIntegralElectrodes(conductors, k_e=1.0)
+    rng = np.random.default_rng(2)
+    sources = rng.uniform(-0.5, 0.5, (2, 300)) + [[4.0], [0.0]]
+    charges = rng.normal(size=300)
+    electrodes.solve(sources, charges)
+    points = rng.uniform(-3.0, 4.0, (2, 2000))
+    direct = electrodes.probe(points)
+    monkeypatch.setattr(electrodes_module, "TREE_PAIRS", 0)
+    tree = electrodes.probe(points)
+    assert len(electrodes._trees) == 1  # the panels' tree, kept for the next probe
+    for a, b in zip(tree, direct):
+        assert np.abs(a - b).max() < 1e-11 * np.abs(b).max()
+    # a second solve recharges the kept tree
+    electrodes.solve(sources, -charges)
+    again = electrodes.probe(points)
+    monkeypatch.setattr(electrodes_module, "TREE_PAIRS", 10**18)
+    reference = electrodes.probe(points)
+    for a, b in zip(again, reference):
+        assert np.abs(a - b).max() < 1e-11 * np.abs(b).max()
+
+
+@pytest.mark.parametrize("far_points", [1, 2])
+@pytest.mark.parametrize("face", [None, Face("x", -0.2)])
+def test_periodic_fast_sums_and_gmres_match_the_direct_ones(
+    far_points, face, monkeypatch
+):
+    rng = np.random.default_rng(3)
+    plates = conductors_from_shape(Circle(midpoint=(0.5, 0.0), radius=0.3), 1.0, 0.04)
+    plates += conductors_from_shape(Circle(midpoint=(1.4, 0.4), radius=0.3), -1.0, 0.04)
+    sources = np.stack((rng.uniform(0.1, 0.9, 200), rng.uniform(-1.0, 1.0, 200)))
+    charges = rng.normal(size=200) * 1e-2
+    points = rng.uniform([[0.0], [-1.5]], [[2.0], [1.5]], (2, 800))
+    results = {}
+    for name, pairs, solver in (("fast", 0, "gmres"), ("direct", 10**18, "direct")):
+        monkeypatch.setattr(electrodes_module, "TREE_PAIRS", pairs)
+        electrodes = BoundaryIntegralElectrodes(
+            plates, period=2.0, face=face, solver=solver, far_points=far_points, k_e=1.0
+        )
+        electrodes.solve(sources, charges)
+        results[name] = (
+            electrodes.charge,
+            *electrodes.probe(points),
+            *electrodes.force_on_sources(),
+        )
+    for a, b in zip(results["fast"], results["direct"]):
+        assert np.abs(a - b).max() < 1e-8 * np.abs(b).max()

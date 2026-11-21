@@ -49,6 +49,9 @@ KERNEL_NAMES = (
 #: The kernels with a Metal version (all of them).
 METAL_KERNEL_NAMES = KERNEL_NAMES
 
+#: Kernels for the CPU only (Pyccel and NumPy versions): the GPU does their work otherwise.
+HOST_KERNEL_NAMES = ("quadtree_split",)
+
 _COMPILED: bool | None = None
 
 
@@ -65,7 +68,7 @@ class _Uncompiled:
 def _kernel_objects() -> dict[str, Any]:
     return {
         name: importlib.import_module(f"{__name__}.{name}").kernel
-        for name in KERNEL_NAMES
+        for name in KERNEL_NAMES + HOST_KERNEL_NAMES
     }
 
 

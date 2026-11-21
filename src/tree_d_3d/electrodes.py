@@ -23,11 +23,16 @@ plane domain face (`Face`, Neumann or Dirichlet, by mirror images) take the plac
 stacked and mirrored copies of the electrodes an extraction cell would otherwise need.
 
 Up to `DIRECT_LIMIT` panels the system is solved directly, by an LU factorisation done
-once per geometry and reused by every `BoundaryIntegralElectrodes.solve`. Above it, in
-free space or beside a face, ``solver="auto"`` iterates instead: GMRES, preconditioned by
-the panels' self terms, with each product ``S Q`` a fast multipole sum over the Gauss
-nodes (`tree_d_3d.FlatQuadtree.fmm`) plus the sparse exact near corrections, so memory
-and time grow almost linearly with the panels instead of as ``P**2`` and ``P**3``.
+once per geometry and reused by every `BoundaryIntegralElectrodes.solve`. Above it
+``solver="auto"`` iterates instead: GMRES, preconditioned by the exact panel matrix of each
+run of consecutive panels (block Jacobi), with each product ``S Q`` a fast multipole sum
+over the Gauss nodes (`tree_d_3d.FlatQuadtree.fmm`) plus the sparse exact near
+corrections, so memory and time grow almost linearly with the panels instead of as
+``P**2`` and ``P**3``. Large sums at probes and over free charges walk a multipole tree
+(above `TREE_PAIRS` pairs). With a period the fast sums run in the plane mapped by
+``z -> exp(2 pi z / period)``, where the row of copies of a charge becomes one charge
+(`BoundaryIntegralElectrodes._periodic_tree_sum`), for points within `MAP_REACH` periods
+of the conductors along x.
 
 The log kernel is the one `tree_d_3d.FlatQuadtree` and `tree_d_3d.direct_field`
 use with ``kernel="log"``: potential ``-2 q ln r`` and field ``2 q d / r**2`` per unit
@@ -59,6 +64,19 @@ NEAR_FIELD: float = 4.0
 FAR_POINTS: int = 2
 #: Above this many panels ``solver="auto"`` iterates (GMRES with the FMM) instead of LU.
 DIRECT_LIMIT: int = 3000
+#: Above this many target-source pairs a free-space sum walks a multipole tree.
+TREE_PAIRS: int = 4_000_000
+#: The opening angle and leaf size of the panels' multipole sums. With ``fmm_order`` 32 the
+#: error is about 2e-12 of the field, at 1.3x the speed of 0.5 with order 24 (measured on
+#: panel nodes along curves, where leaves of 16 beat 32).
+FMM_THETA: float = 0.7
+FMM_LEAF: int = 16
+#: Consecutive panels of a conductor per block of the GMRES preconditioner.
+PRECONDITIONER_BLOCK: int = 256
+#: With a period, the fast sums map the plane by ``exp(2 pi z / period)``; they take points
+#: within this many periods of the conductors along x (the map's range is ``exp(2 pi`` this),
+#: farther ones fall back to the direct periodic sum.
+MAP_REACH: float = 8.0
 
 
 def _segment_rules() -> dict:
@@ -236,21 +254,6 @@ def periodic_log_kernel(d, period: float) -> tuple[np.ndarray, np.ndarray]:
         ex = np.where(large, np.sign(a) * (1.0 - e * e) / tail, np.sinh(near_a) / c)
         ey = np.where(large, 2.0 * np.sin(b) * e / tail, np.sin(b) / c)
     return phi, k * np.stack((ex, ey))
-
-
-def _in_loop(points: np.ndarray, vertices: np.ndarray) -> np.ndarray:
-    """Even-odd test of ``(2, M)`` points against the closed loop ``vertices`` ``(2, n)``."""
-    x, y = points
-    inside = np.zeros(x.size, dtype=bool)
-    xa, ya = vertices
-    xb, yb = np.roll(xa, -1), np.roll(ya, -1)
-    for x0, y0, x1, y1 in zip(xa, ya, xb, yb):
-        if y0 == y1:
-            continue
-        straddles = (y0 > y) != (y1 > y)
-        crossing = x0 + (y - y0) * (x1 - x0) / (y1 - y0)
-        inside ^= straddles & (x < crossing)
-    return inside
 
 
 class _Operator(LinearOperator):
@@ -481,7 +484,7 @@ def _grounded_circle_problem() -> ConvergenceProblem:
     assumptions=(
         r"a first-kind single-layer equation; straight panels of uniform charge $Q_k$ (piecewise-constant density), collocated at their midpoints $\mathbf m_k$",
         r"$G$ = `far_points` = 2 Gauss-Legendre nodes $x_g$, weights $\omega_g$, per far panel; panels within $n_\mathrm{near}$ = `near_field` = 4 of their lengths enter exactly (`segment_field`)",
-        r"$\mathsf S$ is not symmetric: up to `DIRECT_LIMIT` panels dense and LU-factorised once, $O(P^3)$, and $O(P^2)$ per `solve`; above it GMRES with a Jacobi (self-term) preconditioner and FMM products, $O(P)$ per iteration, the iterations growing slowly with $P$",
+        r"$\mathsf S$ is not symmetric: up to `DIRECT_LIMIT` panels dense and LU-factorised once, $O(P^3)$, and $O(P^2)$ per `solve`; above it GMRES with a block-Jacobi preconditioner (runs of `PRECONDITIONER_BLOCK` consecutive panels) and FMM products, $O(P)$ per iteration, the iterations growing slowly with $P$",
         r"no conductor at infinity and no constraint on the total charge: the reference length of the logarithm is the unit of length, and a lone conductor of logarithmic capacity 1 (a circle of radius 1) makes $\mathsf S$ singular",
         r"keep panels shorter than the gaps between surfaces; the order is in the panel length",
         r"with a period $P$ along $y$ the point kernel is the row sum $G_P$ (`periodic_log_kernel`) and the near panel copies, shifted by $\pm P$, enter exactly; a face $\mathsf M$ mirrors every charge about it, and the conductors' potentials are measured from a Dirichlet face's $V_\mathrm{face}$",
@@ -509,9 +512,10 @@ class BoundaryIntegralElectrodes:
     midpoint rule.
 
     ``solver`` is ``"direct"`` (dense LU), ``"gmres"`` (fast multipole products,
-    without a period; converged to ``tolerance`` in at most ``max_iterations``, with
-    ``fmm_order`` expansion terms) or ``"auto"``, which iterates above
-    `DIRECT_LIMIT` panels. ``iterations`` counts the last solve's GMRES steps.
+    converged to ``tolerance`` in at most ``max_iterations``, with ``fmm_order``
+    expansion terms) or ``"auto"``, which iterates above `DIRECT_LIMIT` panels.
+    ``iterations`` counts the last solve's GMRES steps. Sums over more than
+    `TREE_PAIRS` pairs (probes, free charges) walk a multipole tree too.
 
     ``period`` makes the geometry periodic along y: every charge, induced or free,
     stands for a row of copies ``period`` apart, summed in closed form by
@@ -726,10 +730,28 @@ class BoundaryIntegralElectrodes:
         if np.any(offset > tolerance) and np.any(offset < -tolerance):
             raise ValueError("the conductors must all lie on one side of the face")
 
+    def _loop_polygon(self, conductor: Conductor):
+        """The even-odd test of a closed conductor's loop, by simgeometry's compiled kernel."""
+        cache = self.__dict__.setdefault("_polygons", {})
+        test = cache.get(id(conductor))
+        if test is None:
+            from simgeometry import Polygon
+
+            polygon = Polygon(
+                vertices=np.ascontiguousarray(np.asarray(conductor.vertices, float).T)
+            )
+
+            def test(points, polygon=polygon):
+                return np.asarray(polygon.contains_points(points), dtype=bool)
+
+            cache[id(conductor)] = test
+        return test
+
     def _loop_holds(self, conductor: Conductor, points: np.ndarray) -> np.ndarray:
         """Mask of the ``(2, M)`` points inside a closed conductor's loop, over the periods."""
         vertices = np.asarray(conductor.vertices, dtype=float)
         low, high = vertices[1].min(), vertices[1].max()
+        left, right = vertices[0].min(), vertices[0].max()
         held = np.zeros(points.shape[1], dtype=bool)
         if not points.shape[1]:
             return held
@@ -741,21 +763,52 @@ class BoundaryIntegralElectrodes:
             shifts = np.arange(first, last + 1) * self.period
         for shift in shifts:
             candidates = np.flatnonzero(
-                ~held & (points[1] - shift >= low) & (points[1] - shift <= high)
+                ~held
+                & (points[1] - shift >= low)
+                & (points[1] - shift <= high)
+                & (points[0] >= left)
+                & (points[0] <= right)
             )
             if candidates.size:
                 shifted = points[:, candidates] - np.array([[0.0], [shift]])
-                held[candidates[_in_loop(shifted, vertices)]] = True
+                held[candidates[self._loop_polygon(conductor)(shifted)]] = True
         return held
 
+    def _exact_block(self, block: np.ndarray) -> np.ndarray:
+        """The dense ``S`` among the panels ``block``: their point terms and near corrections."""
+        k = self.far_points
+        matrix = np.zeros((block.size, block.size))
+        for image, sign in enumerate(self._image_signs):
+            nodes = self._image_nodes[image]
+            for g in range(k):
+                matrix += (
+                    sign
+                    * self._weights[g]
+                    * self._pairwise_potential(
+                        self.midpoints[:, block], nodes[:, block * k + g]
+                    )
+                )
+        return matrix + self._correction[block][:, block].toarray()
+
+    def _mapped(self, points: np.ndarray):
+        """``exp(2 pi (x - x0 + i y) / period)``: complex ``(M,)`` and as ``(2, M)`` points."""
+        assert self.period is not None
+        z = np.exp(
+            (2.0 * np.pi / self.period) * ((points[0] - self._map_x0) + 1j * points[1])
+        )
+        return z, np.stack((z.real, z.imag))
+
     def _prepare_iterative(self) -> None:
-        """The sparse near corrections and the diagonal of the GMRES solve.
+        """The sparse near corrections and the block preconditioner of the GMRES solve.
 
         ``S Q`` is the FMM sum over every panel's Gauss nodes (and their mirror
         images), with the panel midpoints as charge-free targets, plus the sparse
-        near correction ``C`` (exact segment less point terms). The diagonal of ``S``
-        (each panel's self term) preconditions; a sparse LU of all near entries does
-        worse for this first-kind equation, whose smooth far part it leaves out.
+        near correction ``C`` (exact segment less point terms). The preconditioner is
+        block Jacobi: the exact ``S`` among each run of `PRECONDITIONER_BLOCK`
+        consecutive panels of a conductor, LU-factorised once. It takes in the
+        high-frequency modes of this first-kind equation, which are local along a
+        conductor: 51 iterations instead of 150 with the self terms alone at 21k panels.
+        A sparse LU of all near entries does worse, missing their smooth far part.
         """
         target, panel, image, shift = self._near_entries()
         correction, _ = self._near_correction(
@@ -763,7 +816,12 @@ class BoundaryIntegralElectrodes:
         )
         shape = (self.num_panels, self.num_panels)
         self._correction = csc_matrix((correction, (target, panel)), shape=shape)
-        self._diagonal = 2.0 * (1.0 - np.log(self.lengths / 2.0))
+        self._blocks = []
+        for conductor in np.unique(self.group):
+            panels = np.flatnonzero(self.group == conductor)
+            for first in range(0, panels.size, PRECONDITIONER_BLOCK):
+                block = panels[first : first + PRECONDITIONER_BLOCK]
+                self._blocks.append((block, lu_factor(self._exact_block(block))))
         # the FMM's sources (every image's nodes) and its charge-free targets
         nodes = np.concatenate(list(self._image_nodes), axis=1)
         k = self.far_points
@@ -774,11 +832,26 @@ class BoundaryIntegralElectrodes:
         else:
             self._fmm_points = np.concatenate((nodes, self.midpoints), axis=1)
             self._fmm_targets = nodes.shape[1] + np.arange(self.num_panels)
-        low = self._fmm_points.min(axis=1)
-        high = self._fmm_points.max(axis=1)
+        # with a period the products are free-space sums over the mapped points
+        self._fmm_plane = (
+            self._fmm_points
+            if self.period is None
+            else self._mapped(self._fmm_points)[1]
+        )
+        low = self._fmm_plane.min(axis=1)
+        high = self._fmm_plane.max(axis=1)
         half = 0.5 * float(np.max(high - low)) * (1.0 + 1e-6) + 1e-300
         centre = 0.5 * (low + high)
         self._fmm_quad = Quad(float(centre[0]), float(centre[1]), half)
+
+    def _mappable(self, *point_sets: np.ndarray) -> bool:
+        """Whether every point lies within `MAP_REACH` periods of the conductors along x."""
+        assert self.period is not None
+        reach = MAP_REACH * self.period
+        return all(
+            not p.shape[1] or float(np.abs(p[0] - self._map_x0).max()) <= reach
+            for p in point_sets
+        )
 
     def __init__(
         self,
@@ -791,16 +864,11 @@ class BoundaryIntegralElectrodes:
         far_points: int = FAR_POINTS,
         solver: str = "auto",
         tolerance: float = 1e-10,
-        fmm_order: int = 24,
+        fmm_order: int = 32,
         max_iterations: int = 2000,
     ) -> None:
         if solver not in ("auto", "direct", "gmres"):
             raise ValueError("solver must be 'auto', 'direct' or 'gmres'")
-        if solver == "gmres" and period is not None:
-            raise ValueError(
-                "the iterative solver sums in free space; use solver='direct' with a "
-                "period"
-            )
         if not 0 < tolerance < 1:
             raise ValueError("tolerance must lie in (0, 1)")
         if not conductors:
@@ -893,19 +961,30 @@ class BoundaryIntegralElectrodes:
         self._shifts = (
             (0.0,) if self.period is None else (-self.period, 0.0, self.period)
         )
+        # the centre of the conductors along x, where the periodic map is centred
+        self._map_x0 = 0.5 * float(
+            np.min(np.minimum(self.starts[0], self.ends[0]))
+            + np.max(np.maximum(self.starts[0], self.ends[0]))
+        )
         #: the potential the conductors' potentials are measured from: a Dirichlet face's
         self.offset = face.potential if face is not None else 0.0
+        mappable = self.period is None or self._mappable(self.starts, self.ends)
+        if solver == "gmres" and not mappable:
+            raise ValueError(
+                f"with a period the iterative solver needs the conductors within "
+                f"{MAP_REACH} periods along x; use solver='direct'"
+            )
         if solver == "auto":
             solver = (
-                "gmres"
-                if self.period is None and self.num_panels > DIRECT_LIMIT
-                else "direct"
+                "gmres" if mappable and self.num_panels > DIRECT_LIMIT else "direct"
             )
         #: ``"direct"`` (dense LU) or ``"gmres"`` (FMM matrix-vector products)
         self.solver = solver
         self.tolerance = float(tolerance)
         self.fmm_order = int(fmm_order)
         self.max_iterations = int(max_iterations)
+        # multipole trees over sources that never move (the panels' nodes), by key
+        self._trees: dict = {}
         #: GMRES iterations of the last `solve` (0 for the direct solver)
         self.iterations = 0
         with sp.region("tree_d_3d.electrodes.factorize", tags=_PROFILE_TAGS):
@@ -919,15 +998,72 @@ class BoundaryIntegralElectrodes:
         self._source_positions = np.zeros((2, 0))
         self._source_charges = np.zeros(0)
 
+    def _periodic_tree_sum(self, points, sources, charges, key):
+        """A periodic sum as a free-space one over the mapped points.
+
+        With ``z = exp(2 pi (x - x0 + i y) / P)`` the row kernel is
+        ``G_P = -ln|z_t - z_s|^2 + 2 pi (x_t + x_s - 2 x0) / P + 2 ln(2 pi / P)``: a log sum
+        over the mapped sources (a multipole tree, kept for sources that never move)
+        and terms linear in ``x``. The field follows from ``dz/dx = (2 pi / P) z``. A
+        target on a source drops that pair with its linear terms, which leaves the
+        other periods only (the remainder, zero there), as `_periodic_sum` does.
+        """
+        assert self.period is not None
+        k = 2.0 * np.pi / self.period
+        z_t, mapped_t = self._mapped(points)
+        tree = self._trees.get(("periodic", key)) if key is not None else None
+        if tree is None:
+            _, mapped_s = self._mapped(sources)
+            low, high = mapped_s.min(axis=1), mapped_s.max(axis=1)
+            centre = 0.5 * (low + high)
+            half = 0.5 * float(np.max(high - low)) * (1.0 + 1e-9) + 1e-300
+            tree = FlatQuadtree(
+                mapped_s,
+                charges,
+                Quad(float(centre[0]), float(centre[1]), half),
+                kernel="log",
+                order=self.fmm_order,
+                leaf_capacity=FMM_LEAF,
+            )
+            if key is not None:
+                self._trees[("periodic", key)] = tree
+        else:
+            tree.set_charges(charges)
+        distance, nearest = KDTree(sources.T).query(points.T)
+        exclude = np.where(distance == 0.0, nearest, -1).astype(np.int64)
+        phi_z, field_z = tree.evaluate(mapped_t, exclude=exclude, theta=FMM_THETA)
+        phi_z, field_z = np.asarray(phi_z), np.asarray(field_z)
+        total = float(np.sum(charges))
+        x_t = points[0] - self._map_x0
+        phi = (
+            phi_z
+            + k * total * x_t
+            + k * float(np.sum(charges * (sources[0] - self._map_x0)))
+            + 2.0 * total * np.log(k)
+        )
+        complex_field = (field_z[0] - 1j * field_z[1]) * k * z_t - k * total
+        dropped = np.flatnonzero(exclude >= 0)
+        if dropped.size:
+            q = charges[exclude[dropped]]
+            phi[dropped] -= q * (2.0 * k * x_t[dropped] + 2.0 * np.log(k))
+            complex_field[dropped] += k * q
+        return phi, np.stack((complex_field.real, -complex_field.imag))
+
     def _periodic_sum(
-        self, points: np.ndarray, sources: np.ndarray, charges: np.ndarray
+        self, points: np.ndarray, sources: np.ndarray, charges: np.ndarray, key=None
     ) -> tuple[np.ndarray, np.ndarray]:
-        """`periodic_log_kernel` summed over ``sources``; coincident pairs give zero."""
+        """`periodic_log_kernel` summed over ``sources``; coincident pairs give zero.
+
+        Above `TREE_PAIRS` pairs, and within `MAP_REACH` periods, by the mapped tree
+        (`_periodic_tree_sum`), otherwise directly, in chunks.
+        """
         m = points.shape[1]
         phi = np.zeros(m)
         field = np.zeros((2, m))
         if not sources.shape[1]:
             return phi, field
+        if m * sources.shape[1] > TREE_PAIRS and self._mappable(points, sources):
+            return self._periodic_tree_sum(points, sources, charges, key)
         rows = max(1, _PAIRS_PER_CHUNK // sources.shape[1])
         for first in range(0, m, rows):
             block = slice(first, first + rows)
@@ -937,6 +1073,33 @@ class BoundaryIntegralElectrodes:
             field[:, block] = pair_field @ charges
         return phi, field
 
+    def _tree_sum(self, points, sources, charges, exclude, key):
+        """A large free-space sum by a Barnes-Hut walk with ``fmm_order`` log expansions.
+
+        The tree over sources that never move (the panels' nodes, ``key``) is built
+        once and only recharged; others are built for the call. At `FMM_THETA` and the
+        default order 32 the error is about 1e-12 of the field.
+        """
+        tree = self._trees.get(key) if key is not None else None
+        if tree is None:
+            low, high = sources.min(axis=1), sources.max(axis=1)
+            centre = 0.5 * (low + high)
+            half = 0.5 * float(np.max(high - low)) * (1.0 + 1e-9) + 1e-300
+            tree = FlatQuadtree(
+                sources,
+                charges,
+                Quad(float(centre[0]), float(centre[1]), half),
+                kernel="log",
+                order=self.fmm_order,
+                leaf_capacity=FMM_LEAF,
+            )
+            if key is not None:
+                self._trees[key] = tree
+        else:
+            tree.set_charges(charges)
+        phi, field = tree.evaluate(points, exclude=exclude, theta=FMM_THETA)
+        return np.array(phi), np.array(field)
+
     def _far_sum(
         self,
         points: np.ndarray,
@@ -944,10 +1107,13 @@ class BoundaryIntegralElectrodes:
         charges: np.ndarray,
         image: int,
         exclude: np.ndarray | None = None,
+        key=None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Raw potential and field at ``points`` of one image of point line charges.
 
-        Free space: `tree_d_3d.direct_field`, skipping ``exclude``; with a period,
+        Free space: `tree_d_3d.direct_field`, skipping ``exclude``, or above
+        `TREE_PAIRS` pairs a multipole tree (`_tree_sum`; ``key`` names sources that
+        never move, whose tree is kept); with a period,
         `periodic_log_kernel` summed in chunks, where a target on a source keeps
         only the other periods (the remainder, zero there).
         """
@@ -955,11 +1121,20 @@ class BoundaryIntegralElectrodes:
         if image and self.face is not None:
             sources = self.face.mirror(sources)
         if self.period is None:
+            if points.shape[1] * sources.shape[1] > TREE_PAIRS:
+                return self._tree_sum(points, sources, sign * charges, exclude, key)
             phi, field = direct_field(
                 points, sources, sign * charges, kernel="log", exclude=exclude
             )
             return np.array(phi), np.array(field)
-        return self._periodic_sum(points, sources, sign * charges)
+        return self._periodic_sum(points, sources, sign * charges, key=key)
+
+    def _precondition(self, residual: np.ndarray) -> np.ndarray:
+        """The block-Jacobi solve (`_prepare_iterative`)."""
+        out = np.empty_like(residual)
+        for block, lu in self._blocks:
+            out[block] = lu_solve(lu, residual[block])
+        return out
 
     def _apply(self, charge: np.ndarray) -> np.ndarray:
         """``S @ charge`` by the FMM and the sparse near corrections."""
@@ -973,22 +1148,43 @@ class BoundaryIntegralElectrodes:
                 )
             ]
         )
-        tree = FlatQuadtree(
-            self._fmm_points,
-            sources,
-            self._fmm_quad,
-            kernel="log",
-            order=self.fmm_order,
-            leaf_capacity=32,
-        )
-        phi, _ = tree.fmm()
-        return np.asarray(phi)[self._fmm_targets] + self._correction @ charge
+        # the points never move: one tree per geometry, new charges per product
+        tree = getattr(self, "_fmm_tree", None)
+        if tree is None:
+            tree = self._fmm_tree = FlatQuadtree(
+                self._fmm_plane,
+                sources,
+                self._fmm_quad,
+                kernel="log",
+                order=self.fmm_order,
+                leaf_capacity=FMM_LEAF,
+            )
+        else:
+            tree.set_charges(sources)
+        phi, _ = tree.fmm(theta=FMM_THETA)
+        phi = np.asarray(phi)[self._fmm_targets]
+        if self.period is not None:
+            # the terms of the row kernel linear in x (`_periodic_tree_sum`); a target's
+            # own node (odd far_points) is left out with its linear terms
+            k = 2.0 * np.pi / self.period
+            x = self._fmm_points[0] - self._map_x0
+            total = float(np.sum(sources))
+            x_t = x[self._fmm_targets]
+            own = sources[self._fmm_targets]
+            phi = (
+                phi
+                + k * total * x_t
+                + k * float(np.sum(sources * x))
+                + 2.0 * total * np.log(k)
+                - own * (2.0 * k * x_t + 2.0 * np.log(k))
+            )
+        return phi + self._correction @ charge
 
     @sp.profile("tree_d_3d.electrodes.gmres", tags=_PROFILE_TAGS)
     def _solve_iterative(self, rhs: np.ndarray) -> np.ndarray:
-        """GMRES on `_apply`, preconditioned by the panels' self terms."""
+        """GMRES on `_apply`, preconditioned block by block (`_precondition`)."""
         operator = _Operator(self.num_panels, self._apply)
-        preconditioner = _Operator(self.num_panels, lambda v: v / self._diagonal)
+        preconditioner = _Operator(self.num_panels, self._precondition)
         count = [0]
 
         def callback(_):
@@ -1031,7 +1227,9 @@ class BoundaryIntegralElectrodes:
         e = np.zeros((2, m))
         for image in range(len(self._image_signs)):
             exclude = None if self.period else self._node_exclude(points, image)
-            p, f = self._far_sum(points, self._nodes, node_charge, image, exclude)
+            p, f = self._far_sum(
+                points, self._nodes, node_charge, image, exclude, key=("nodes", image)
+            )
             phi += p
             e += f
         target, panel, image, shift = self._near_pairs(points)
