@@ -7,9 +7,9 @@ import pytest
 from scipy.optimize import brentq
 from scipy.special import erfi
 
-import tree_d_3d.simulation as bh
 from tree_d_3d.bodies import ChargedBody
 from tree_d_3d.flat_tree import FlatQuadtree, direct_field
+from tree_d_3d.kernels import kernels_compiled
 from tree_d_3d.quad import Quad
 from tree_d_3d.simulation import ElectrostaticSimulation as Simulation
 
@@ -54,7 +54,7 @@ def test_fmm_agrees_for_any_leaf_size_and_with_python_source():
         tree = FlatQuadtree(pos, q, Quad(0, 0, 1), kernel="log", leaf_capacity=leaf)
         _, field = tree.fmm()
         assert relative(field, ref_field) < 5e-7
-    if bh.kernels_compiled():
+    if kernels_compiled():
         compiled = FlatQuadtree(pos, q, Quad(0, 0, 1), kernel="log", order=8).fmm()
         python = FlatQuadtree(
             pos, q, Quad(0, 0, 1), kernel="log", order=8, compiled=False
@@ -107,7 +107,7 @@ def test_method_selection_and_validation():
     pos, q = cloud(1500, seed=4)
     bodies = [ChargedBody(*p, charge=c) for p, c in zip(pos.T, q)]
     sim = Simulation(bodies, Quad(0, 0, 1), k_e=1, kernel="log", softening=0.01)
-    assert sim._resolve_method() == ("fmm" if bh.kernels_compiled() else "direct")
+    assert sim._resolve_method() == "fmm"
     with pytest.raises(ValueError, match="theta"):
         Simulation([], Quad(0, 0, 1), method="fmm", kernel="log", theta=1.2)
 

@@ -7,6 +7,7 @@ import pytest
 import tree_d_3d.simulation as bh
 from tree_d_3d.bodies import ChargedBody
 from tree_d_3d.flat_tree import FlatQuadtree, direct_field
+from tree_d_3d.kernels import kernels_compiled
 from tree_d_3d.quad import Quad
 from tree_d_3d.reference import ReferenceQuadtree
 from tree_d_3d.simulation import ElectrostaticSimulation as Simulation
@@ -56,7 +57,7 @@ def test_flat_tree_matches_object_tree(theta, leaf_capacity, max_depth):
 
 
 def test_compiled_kernels_match_python_source():
-    if not bh.kernels_compiled():
+    if not kernels_compiled():
         pytest.skip("Pyccel kernels unavailable")
     pos, charge = cloud(200, seed=1)
     exclude = np.arange(pos.shape[1])
@@ -206,9 +207,8 @@ def test_bodies_added_after_construction_are_adopted():
 
 def test_auto_method_selection():
     assert make_simulation(n=20).step() is None
-    # Uncompiled, the NumPy direct sum beats a Python tree walk at any size.
-    tree_expected = FlatQuadtree if bh.kernels_compiled() else type(None)
-    assert isinstance(make_simulation(n=20, direct_threshold=5).step(), tree_expected)
+    # above the threshold a tree (the FMM's or the walk's), compiled or not
+    assert isinstance(make_simulation(n=20, direct_threshold=5).step(), FlatQuadtree)
     assert make_simulation(n=20, direct_threshold=5, theta=0).step() is None
     with pytest.raises(ValueError, match="theta"):
         make_simulation(method="fmm", theta=1.0)
