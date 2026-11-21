@@ -2359,7 +2359,7 @@ dependencies = [
 [[package]]
 name = "maybempi"
 version = "0.1.2"
-source = { git = "https://github.com/max-models/maybempi?branch=devel#0146f000137c58b84381c176e03ffd2b3e191ce7" }
+source = { git = "https://github.com/max-models/maybempi?branch=devel#34779d488da18f1ddde8207c885b6e251d62d0b7" }
 
 [[package]]
 name = "meson"
