@@ -72,7 +72,7 @@ def cartesian_local(local, mono, ex, ey, grad):
 
 def complex_powers(z: np.ndarray, order: int) -> np.ndarray:
     """``(len(z), order + 1)`` powers ``z**k``, k = 0 ... order, by repeated products."""
-    out = np.empty((len(z), order + 1), dtype=complex)
+    out = np.empty((len(z), order + 1), dtype=np.complex128)
     out[:, 0] = 1.0
     for k in range(1, order + 1):
         out[:, k] = out[:, k - 1] * z

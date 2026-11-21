@@ -33,7 +33,7 @@ def log_moments_upward(
     order = moment_re.shape[1] - 1
     for level in range(len(levels) - 2, -1, -1):
         nodes = np.arange(levels[level], levels[level + 1], dtype=np.intp)
-        moments = np.zeros((len(nodes), order + 1), dtype=complex)
+        moments = np.zeros((len(nodes), order + 1), dtype=np.complex128)
         qabs = np.zeros(len(nodes))
         first = node_child[nodes]
         leaf = first < 0

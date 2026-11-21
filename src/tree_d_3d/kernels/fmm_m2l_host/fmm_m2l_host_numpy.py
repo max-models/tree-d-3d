@@ -41,7 +41,7 @@ def fmm_m2l_host(
         s = (a * powers) @ coeff
         b = sign * s * powers
         b[:, 0] = a[:, 0] * np.log(t) - s[:, 0]
-        total = np.zeros((n_nodes, order + 1), dtype=complex)
+        total = np.zeros((n_nodes, order + 1), dtype=np.complex128)
         np.add.at(total, dst, b)
         local_re += total.real
         local_im += total.imag
