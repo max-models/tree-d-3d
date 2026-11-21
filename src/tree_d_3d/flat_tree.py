@@ -32,9 +32,9 @@ from __future__ import annotations
 import cunumpy as xp
 import numpy as np
 import scope_profiler as sp
+from maybempi import collectives
 from methodcard import ConvergenceProblem, Rule, method
 
-from tree_d_3d import distributed
 from tree_d_3d._profiling import _PROFILE_TAGS
 from tree_d_3d._utils import _check, _device, _finite, _host, _points
 from tree_d_3d.constants import K_E
@@ -608,9 +608,9 @@ class FlatQuadtree:
     def _share(self, work) -> slice:
         """This rank's contiguous run of items with about an even share of ``work``."""
         work = np.asarray(_host(work), dtype=float)
-        if not distributed.is_parallel(self.comm):
+        if not collectives.is_parallel(self.comm):
             return slice(0, work.size)
-        ranks, me = distributed.size(self.comm), distributed.rank(self.comm)
+        ranks, me = collectives.size(self.comm), collectives.rank(self.comm)
         cumulative = np.cumsum(work)
         total = cumulative[-1] if work.size else 0.0
         cuts = np.searchsorted(cumulative, total * np.arange(1, ranks) / ranks)
@@ -623,11 +623,11 @@ class FlatQuadtree:
 
     def _gather_moments(self, share: slice, outputs: tuple) -> None:
         """Fill ``outputs`` (per-cell arrays) on every rank from each rank's ``share``."""
-        if not distributed.is_parallel(self.comm):
+        if not collectives.is_parallel(self.comm):
             return
         columns = [np.asarray(out).reshape(self.node_count, -1) for out in outputs]
         mine = np.concatenate([c[share] for c in columns], axis=1)
-        gathered, _ = distributed.gather_columns(self.comm, mine.T)
+        gathered, _ = collectives.gather_columns(self.comm, mine.T)
         first = 0
         for out, column in zip(outputs, columns):
             width = column.shape[1]
@@ -659,7 +659,7 @@ class FlatQuadtree:
                 3 * int(self.node_depth.max()) + 8, dtype=np.int64
             )
             # on the CPU of one process: one upward pass (leaves, then M2M)
-            upward = isinstance(self.pos, np.ndarray) and not distributed.is_parallel(
+            upward = isinstance(self.pos, np.ndarray) and not collectives.is_parallel(
                 self.comm
             )
             levels = np.asarray(self.levels, dtype=np.int64)
@@ -808,7 +808,7 @@ class FlatQuadtree:
     def _fmm_shares(self, theta: float) -> tuple[slice, slice, slice]:
         """This rank's M2L pairs, leaves (for L2P) and P2P pairs, each an even share."""
         m2l, p2p, sizes = self._traversals[theta]
-        if not distributed.is_parallel(self.comm):
+        if not collectives.is_parallel(self.comm):
             return (
                 slice(0, int(sizes[0])),
                 slice(0, self.node_count),
@@ -1177,9 +1177,9 @@ class FlatQuadtree:
                 local_im,
                 n_threads=max(m2l_share.stop - m2l_share.start, 1),
             )
-        if distributed.is_parallel(self.comm):
-            local_re = distributed.total(self.comm, local_re)
-            local_im = distributed.total(self.comm, local_im)
+        if collectives.is_parallel(self.comm):
+            local_re = collectives.allsum(self.comm, local_re)
+            local_im = collectives.allsum(self.comm, local_im)
         for lo, hi in zip(self.levels[:-2], self.levels[1:-1]):
             k.fmm_downward(
                 int(lo),
@@ -1194,7 +1194,7 @@ class FlatQuadtree:
                 n_threads=int(hi - lo),
             )
         status = self._xp.zeros(1, dtype=np.int64)
-        if host and not distributed.is_parallel(self.comm):
+        if host and not collectives.is_parallel(self.comm):
             spos, scharge = self._sorted_sources()
             phi_sorted = np.zeros(n)
             field_sorted = np.zeros((2, n + 1))
@@ -1220,7 +1220,7 @@ class FlatQuadtree:
                 status[0] = self.perm[int(status[0]) - 1] + 1
             phi[self.perm] = phi_sorted
             field[:, self.perm] = field_sorted[:, :n]
-        elif not distributed.is_parallel(self.comm):
+        elif not collectives.is_parallel(self.comm):
             k.fmm_evaluate(
                 self.pos,
                 self.charge,
@@ -1269,9 +1269,9 @@ class FlatQuadtree:
                         nodes.stop - nodes.start, pairs.stop - pairs.start, 1
                     ),
                 )
-            phi = distributed.total(self.comm, phi)
-            field = distributed.total(self.comm, field)
-            status[0] = distributed.largest(self.comm, int(status[0]))
+            phi = collectives.allsum(self.comm, phi)
+            field = collectives.allsum(self.comm, field)
+            status[0] = collectives.allmax(self.comm, int(status[0]))
         _check(status)
         self.fmm_pairs = (int(sizes[0]), int(sizes[1]))
         return phi, field

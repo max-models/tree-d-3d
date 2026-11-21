@@ -1,4 +1,4 @@
-"""MPI runs agree with serial ones: thread ranks (`thread_comm`), and mpirun if present."""
+"""MPI runs agree with serial ones: thread ranks (`maybempi.testing`), and mpirun if present."""
 
 import os
 import shutil
@@ -8,6 +8,8 @@ import textwrap
 
 import numpy as np
 import pytest
+from maybempi import collectives
+from maybempi.testing import run_ranks
 from simgeometry import Circle, Polygon
 
 from tree_d_3d import (
@@ -18,62 +20,9 @@ from tree_d_3d import (
     FlatQuadtree,
     Quad,
     conductors_from_shape,
-    distributed,
 )
-from tree_d_3d.tests.thread_comm import run_ranks
 
 RANKS = 3
-
-
-def test_helpers_without_mpi():
-    local = np.arange(6.0).reshape(2, 3)
-    gathered, offset = distributed.gather_columns(None, local)
-    assert offset == 0 and np.array_equal(gathered, local)
-    assert distributed.total(None, 2.5) == 2.5
-    assert distributed.largest(None, 4) == 4
-    assert distributed.block(7, None) == slice(0, 7)
-    assert distributed.gather_blocks(None, local, 3) is local
-    assert (distributed.size(None), distributed.rank(None)) == (1, 0)
-    assert not distributed.is_parallel(None)
-
-
-def test_helpers_on_ranks():
-    def work(comm):
-        me = comm.Get_rank()
-        share = distributed.block(10, comm)
-        columns, offset = distributed.gather_columns(comm, np.full((2, me + 1), me))
-        flat, _ = distributed.gather_columns(comm, np.full(me, float(me)))
-        pieces = distributed.gather_blocks(comm, np.arange(10.0)[share], 10)
-        return (
-            share,
-            columns,
-            offset,
-            flat,
-            pieces,
-            distributed.total(comm, me),
-            distributed.total(comm, np.array([me, 1.0])),
-            distributed.largest(comm, 5 * me),
-        )
-
-    results = run_ranks(RANKS, work)
-    assert [r[0] for r in results] == [slice(0, 4), slice(4, 7), slice(7, 10)]
-    for _, columns, _, flat, pieces, count, array, largest in results:
-        assert np.array_equal(columns, np.repeat([[0, 1, 1, 2, 2, 2]], 2, axis=0))
-        assert np.array_equal(flat, [1.0, 2.0, 2.0])
-        assert np.array_equal(pieces, np.arange(10.0))
-        assert count == 3 and np.array_equal(array, [3.0, 3.0])
-        assert largest == 10
-    assert [r[2] for r in results] == [0, 1, 3]
-
-
-def test_thread_ranks_report_errors():
-    def work(comm):
-        if comm.Get_rank() == 1:
-            raise RuntimeError("rank 1 failed")
-        comm.Barrier()
-
-    with pytest.raises(RuntimeError, match="rank 1"):
-        run_ranks(2, work)
 
 
 def _cloud(n, seed=1):
@@ -150,7 +99,7 @@ def test_fmm_reports_coincident_charges_on_every_rank():
 
 def _simulation(comm, n, method, kernel, steps=4):
     positions, velocities, charges = _cloud(n)
-    mine = distributed.block(n, comm)
+    mine = collectives.block(n, comm)
     bodies = [
         ChargedBody(*positions[:, i], *velocities[:, i], charge=charges[i])
         for i in range(mine.start, mine.stop)
@@ -172,7 +121,7 @@ def _simulation(comm, n, method, kernel, steps=4):
     for _ in range(steps):
         sim.step()
     sim.compute_fields(include_fixed=True)
-    positions, _ = distributed.gather_columns(comm, sim.positions)
+    positions, _ = collectives.gather_columns(comm, sim.positions)
     return {
         "positions": positions,
         "kinetic": sim.get_kinetic_energy(),
@@ -182,7 +131,7 @@ def _simulation(comm, n, method, kernel, steps=4):
         "momentum": np.asarray(sim.get_momentum()),
         "centre": np.asarray(sim.get_center_of_mass()),
         "angular": sim.get_angular_momentum(),
-        "count": distributed.total(comm, sim.num_particles),
+        "count": collectives.allsum(comm, sim.num_particles),
         "tree": sim.build_tree() is not None,
     }
 
@@ -226,7 +175,7 @@ def test_simulation_with_an_empty_rank():
             bodies, Quad(0, 0, 1), k_e=1e-4, dt=1e-3, softening=1e-3, comm=comm
         )
         sim.step()
-        return distributed.total(comm, sim.num_particles), sim.get_potential_energy(
+        return collectives.allsum(comm, sim.num_particles), sim.get_potential_energy(
             exact=True
         )
 
@@ -288,19 +237,20 @@ _MPI_SCRIPT = textwrap.dedent(
     """
     import numpy as np
     from maybempi import MPI
-    from tree_d_3d import ChargedBody, ElectrostaticSimulation, Quad, distributed
+    from maybempi import collectives
+    from tree_d_3d import ChargedBody, ElectrostaticSimulation, Quad
 
     comm = MPI.COMM_WORLD
     rng = np.random.default_rng(1)
     pos, q = rng.uniform(-0.9, 0.9, (2, 300)), rng.choice([-1.0, 1.0], 300)
-    mine = distributed.block(300, comm)
+    mine = collectives.block(300, comm)
     bodies = [ChargedBody(*pos[:, i], charge=q[i]) for i in range(mine.start, mine.stop)]
     sim = ElectrostaticSimulation(
         bodies, Quad(0, 0, 1), k_e=1e-4, dt=1e-3, softening=1e-3, kernel="log",
         method="fmm", comm=comm,
     )
     sim.step()
-    positions, _ = distributed.gather_columns(comm, sim.positions)
+    positions, _ = collectives.gather_columns(comm, sim.positions)
     energy = sim.get_total_energy()  # collective: every rank calls it
     if comm.Get_rank() == 0:
         print(comm.Get_size(), float(energy), float(positions.sum()))

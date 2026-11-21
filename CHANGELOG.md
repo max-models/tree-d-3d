@@ -14,7 +14,8 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   lists, probes, panel sums, the preconditioner blocks and the dense-matrix rows are split
   over the ranks. At 4 ranks on 4 cores, a 400k-particle step runs 2.5x (FMM) to 3.5x (tree)
   faster, 100k probes 2.9-3.4x and a 21k-panel GMRES solve 2.2x faster
-  ("Parallel runs" in the docs). New module `tree_d_3d.distributed`.
+  ("Parallel runs" in the docs). The gathers and sums come from `maybempi.collectives`; the tests run the parallel paths on
+  thread ranks (`maybempi.testing`).
 
 ### Changed
 
