@@ -58,6 +58,10 @@ HOST_KERNEL_NAMES = (
     "evaluate_groups",
     "fmm_evaluate_host",
     "quadtree_build",
+    "cart_moments_upward",
+    "cart_m2l_host",
+    "cart_downward",
+    "cart_evaluate_host",
 )
 
 _COMPILED: bool | None = None

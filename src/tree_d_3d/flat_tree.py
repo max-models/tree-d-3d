@@ -35,6 +35,7 @@ import scope_profiler as sp
 from maybempi import collectives
 from methodcard import ConvergenceProblem, Rule, method
 
+from tree_d_3d import _cartesian
 from tree_d_3d._profiling import _PROFILE_TAGS
 from tree_d_3d._utils import _check, _device, _finite, _host, _points
 from tree_d_3d.constants import K_E
@@ -43,6 +44,11 @@ from tree_d_3d.quad import Quad
 
 #: Highest expansion order of the CUDA FMM kernels (TREE_D_3D_MAX_ORDER).
 MAX_ORDER = 64
+
+#: Default expansion order of the log kernel (complex terms) and of the Coulomb FMM
+#: (Cartesian terms up to this total degree), when ``order`` is not given.
+LOG_ORDER = 12
+COULOMB_ORDER = 4
 
 
 _KERNELS = ("coulomb", "log")
@@ -443,6 +449,7 @@ class FlatQuadtree:
         # Pyccel rejects zero-length arrays, so build the lone root here.
         self._traversals: dict = {}
         self._sorted = None
+        self._cart_moments = None
         self.perm = self._xp.empty(0, dtype=np.int64)
         self.node_count = 1
         self.node_center = self._xp.array(
@@ -734,12 +741,14 @@ class FlatQuadtree:
         max_depth: int = 48,
         compiled: bool = True,
         kernel: str = "coulomb",
-        order: int = 12,
+        order: int | None = None,
         symmetric: bool = False,
         comm=None,
     ) -> None:
         if kernel not in _KERNELS:
             raise ValueError(f"kernel must be one of {_KERNELS}")
+        if order is None:
+            order = LOG_ORDER if kernel == "log" else COULOMB_ORDER
         if isinstance(order, bool) or int(order) != order or order < 1:
             raise ValueError("order must be a positive integer")
         if order > MAX_ORDER:
@@ -784,6 +793,7 @@ class FlatQuadtree:
                 setattr(self, name, getattr(self, name)[:count].copy())
         self._traversals: dict = {}
         self._sorted = None
+        self._cart_moments = None
         self._moments()
 
     def _m2l_coefficients(self) -> np.ndarray:
@@ -841,6 +851,7 @@ class FlatQuadtree:
             raise ValueError("charges must have one entry per particle")
         self.charge[...] = charges
         self._sorted = None
+        self._cart_moments = None
         if self.pos.shape[1]:
             self._moments()
 
@@ -1037,6 +1048,29 @@ class FlatQuadtree:
             phi[...] = 0.0
         return phi, field
 
+    def _cartesian_moments(self) -> np.ndarray:
+        """The Cartesian multipole moments of every cell (`tree_d_3d._cartesian`), kept."""
+        if self._cart_moments is None:
+            tables = _cartesian.tables(self.order)
+            moments = np.empty((self.node_count, _cartesian.size(self.order)))
+            self._kernels.cart_moments_upward(
+                self.pos,
+                self.charge,
+                self.perm,
+                np.asarray(self.levels, dtype=np.int64),
+                self.node_center,
+                self.node_start,
+                self.node_end,
+                self.node_child,
+                tables["mono_parent"],
+                tables["mono_dir"],
+                tables["shift"],
+                tables["shift_coef"],
+                moments,
+            )
+            self._cart_moments = moments
+        return self._cart_moments
+
     def _traverse(self, theta: float):
         """The M2L and P2P node-pair lists of the dual-tree traversal, and their sizes.
 
@@ -1078,6 +1112,76 @@ class FlatQuadtree:
             if not sizes[3]:
                 return m2l, p2p, sizes
             capacity = np.maximum(2 * capacity, sizes[:3])
+
+    def _coulomb_fmm(self, theta, softening, phi, field):
+        """`fmm` for ``kernel="coulomb"``: Cartesian expansions, on the CPU."""
+        if not isinstance(self.pos, np.ndarray):
+            raise NotImplementedError("the Coulomb FMM runs on the CPU (NumPy arrays)")
+        k = self._kernels
+        n = self.pos.shape[1]
+        if theta not in self._traversals:
+            self._traversals[theta] = self._traverse(theta)
+        m2l, p2p, sizes = self._traversals[theta]
+        tables = _cartesian.tables(self.order)
+        local = np.zeros((self.node_count, _cartesian.size(self.order)))
+        if sizes[0]:
+            rows, partners = self._m2l_rows(theta, m2l, slice(0, int(sizes[0])))
+            k.cart_m2l_host(
+                rows,
+                partners,
+                self.node_center,
+                self.node_center,
+                self._cartesian_moments(),
+                softening,
+                tables["ex"],
+                tables["ey"],
+                tables["rec"],
+                tables["m2l"],
+                tables["m2l_coef"],
+                local,
+            )
+        k.cart_downward(
+            np.asarray(self.levels, dtype=np.int64),
+            self.node_center,
+            self.node_child,
+            tables["mono_parent"],
+            tables["mono_dir"],
+            tables["shift"],
+            tables["shift_coef"],
+            local,
+        )
+        spos, scharge = self._sorted_sources()
+        phi_sorted = np.zeros(n)
+        field_sorted = np.zeros((2, n + 1))
+        status = np.zeros(1, dtype=np.int64)
+        k.cart_evaluate_host(
+            spos,
+            scharge,
+            self.node_count,
+            self.node_center,
+            self.node_start,
+            self.node_end,
+            self.node_child,
+            local,
+            tables["mono_parent"],
+            tables["mono_dir"],
+            tables["ex"],
+            tables["ey"],
+            tables["grad"],
+            p2p,
+            int(sizes[1]),
+            softening,
+            phi_sorted,
+            field_sorted,
+            status,
+        )
+        if int(status[0]):
+            status[0] = self.perm[int(status[0]) - 1] + 1
+        _check(status)
+        phi[self.perm] = phi_sorted
+        field[:, self.perm] = field_sorted[:, :n]
+        self.fmm_pairs = (int(sizes[0]), int(sizes[1]))
+        return phi, field
 
     @method(
         equations={
@@ -1123,8 +1227,6 @@ class FlatQuadtree:
         ``potential=False`` skips the potential (returned as zeros), which saves
         a logarithm per near-field pair when only forces are needed.
         """
-        if self.kernel != "log":
-            raise ValueError("The FMM is implemented for kernel='log'")
         theta = _finite("theta", theta, minimum=0)
         if not 0 < theta < 1:
             raise ValueError("FMM theta must lie in (0, 1)")
@@ -1134,6 +1236,8 @@ class FlatQuadtree:
         field = self._xp.zeros((2, n))
         if not n:
             return phi, field
+        if self.kernel != "log":
+            return self._coulomb_fmm(theta, softening, phi, field)
         k = self._kernels
         count = self.node_count
         # the interaction lists depend on the cells only: kept for set_charges
@@ -1155,6 +1259,7 @@ class FlatQuadtree:
             k.fmm_m2l_host(
                 rows,
                 partners,
+                self.node_center,
                 self.node_center,
                 self.moment_re,
                 self.moment_im,

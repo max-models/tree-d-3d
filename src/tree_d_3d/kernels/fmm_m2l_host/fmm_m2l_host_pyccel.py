@@ -16,7 +16,8 @@ import numpy as np
 def fmm_m2l_host(
     row_start: "int64[:]",
     sources: "int64[:]",
-    node_center: "float[:,:]",
+    dst_center: "float[:,:]",
+    src_center: "float[:,:]",
     moment_re: "float[:,:]",
     moment_im: "float[:,:]",
     coeff: "float[:,:]",
@@ -24,6 +25,9 @@ def fmm_m2l_host(
     local_im: "float[:,:]",
 ) -> None:
     """Add the multipoles of cells ``sources[row_start[n]:row_start[n + 1]]`` to cell ``n``.
+
+    The destination cells' centres are ``dst_center``, the sources' ``src_center``
+    (the same array within one tree).
 
     With ``t = c_dst - c_src``, ``w = 1 / t`` and the scaled moments
     ``a'_k = a_k w**k`` (``a'_0 = a_0``), the translation is a real matrix product,
@@ -52,12 +56,12 @@ def fmm_m2l_host(
             for l in range(order + 1):
                 b_re[l] = 0.0
                 b_im[l] = 0.0
-            cx = node_center[dst, 0]
-            cy = node_center[dst, 1]
+            cx = dst_center[dst, 0]
+            cy = dst_center[dst, 1]
             for e in range(row_start[dst], row_start[dst + 1]):
                 src = sources[e]
-                t_re = cx - node_center[src, 0]
-                t_im = cy - node_center[src, 1]
+                t_re = cx - src_center[src, 0]
+                t_im = cy - src_center[src, 1]
                 t2 = t_re * t_re + t_im * t_im
                 w_re = t_re / t2
                 w_im = -t_im / t2

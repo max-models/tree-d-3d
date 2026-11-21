@@ -76,7 +76,7 @@ def test_fmm_softening_neutral_markers_and_validation():
     assert relative(field, ref_field) < 1e-2
     with pytest.raises(ValueError, match="Coincident"):
         FlatQuadtree(pos, q, Quad(0, 0, 1), kernel="log").fmm()
-    with pytest.raises(ValueError, match="log"):
+    with pytest.raises(ValueError, match="Coincident"):
         FlatQuadtree(pos, q, Quad(0, 0, 1)).fmm()
     with pytest.raises(ValueError, match="theta"):
         FlatQuadtree(pos, q, Quad(0, 0, 1), kernel="log").fmm(theta=1.0)
@@ -108,8 +108,6 @@ def test_method_selection_and_validation():
     bodies = [ChargedBody(*p, charge=c) for p, c in zip(pos.T, q)]
     sim = Simulation(bodies, Quad(0, 0, 1), k_e=1, kernel="log", softening=0.01)
     assert sim._resolve_method() == ("fmm" if bh.kernels_compiled() else "direct")
-    with pytest.raises(ValueError, match="kernel='log'"):
-        Simulation([], Quad(0, 0, 1), method="fmm")
     with pytest.raises(ValueError, match="theta"):
         Simulation([], Quad(0, 0, 1), method="fmm", kernel="log", theta=1.2)
 
@@ -185,3 +183,39 @@ def test_symmetric_truncation_conserves_momentum_to_roundoff():
     ref_phi, ref_field = reference(pos, q)
     rect = FlatQuadtree(pos, q, Quad(0, 0, 1), kernel="log", order=18).fmm(theta=0.5)[1]
     assert relative(rect, ref_field) < relative(field, ref_field) < 1e-6
+
+
+@pytest.mark.parametrize("softening", [0.0, 0.02])
+def test_coulomb_fmm_converges_with_order_and_conserves_momentum(softening):
+    rng = np.random.default_rng(11)
+    pos = np.concatenate(
+        (rng.uniform(-0.9, 0.9, (2, 1500)), rng.normal(0.3, 0.05, (2, 1500))), axis=1
+    ).clip(-0.99, 0.99)
+    q = rng.normal(size=pos.shape[1])
+    everyone = np.arange(pos.shape[1])
+    phi_exact, exact = direct_field(pos, pos, q, exclude=everyone, softening=softening)
+    errors = []
+    for order in (2, 4, 6, 8):
+        tree = FlatQuadtree(pos, q, Quad(0, 0, 1), order=order, leaf_capacity=16)
+        phi, field = tree.fmm(theta=0.5, softening=softening)
+        errors.append(float(np.max(np.abs(field - exact)) / np.max(np.abs(exact))))
+        assert np.max(np.abs(phi - phi_exact)) < 0.05 * np.max(np.abs(phi_exact))
+        # the total-degree truncation makes pair forces exactly antisymmetric
+        net = np.abs((q * field).sum(axis=1)).max()
+        assert net < 1e-12 * np.abs(q * field).sum()
+    assert errors[-1] < 1e-2 * errors[0] and all(np.diff(errors) < 0)
+
+
+def test_coulomb_fmm_without_pyccel_and_on_a_set_charges_tree():
+    rng = np.random.default_rng(12)
+    pos = rng.uniform(-0.9, 0.9, (2, 600))
+    q, other = rng.normal(size=600), rng.normal(size=600)
+    compiled = FlatQuadtree(pos, q, Quad(0, 0, 1), leaf_capacity=8)
+    python = FlatQuadtree(pos, q, Quad(0, 0, 1), leaf_capacity=8, compiled=False)
+    for a, b in zip(compiled.fmm(softening=0.01), python.fmm(softening=0.01)):
+        np.testing.assert_allclose(a, b, rtol=1e-12, atol=1e-12)
+    compiled.set_charges(other)
+    fresh = FlatQuadtree(pos, other, Quad(0, 0, 1), leaf_capacity=8)
+    np.testing.assert_allclose(
+        compiled.fmm(softening=0.01)[1], fresh.fmm(softening=0.01)[1], atol=1e-12
+    )
