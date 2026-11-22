@@ -14,37 +14,21 @@ hero:
       variant: minimal
 ---
 
-import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
-
 tree-d-3d stands for *Tree Dynamics in 3D*. For now the particles move in a plane, with the 3D
 Coulomb field of point charges or the 2D field of line charges. Full 3D, on an octree, is planned.
 
 ## What is included
 
-<CardGrid>
-	<Card title="Flat quadtree" icon="open-book">
-		Point charges (3D Coulomb) or line charges (2D Poisson) at any targets, by Barnes-Hut tree walk or direct sum.
-	</Card>
-	<Card title="Fast multipole method" icon="rocket">
-		O(N) fields of line charges with a dual-tree traversal and complex multipole expansions.
-	</Card>
-	<Card title="Simulation" icon="document">
-		Second-order time integration with a uniform magnetic field, absorbing walls and objects, and cached fields.
-	</Card>
-	<Card title="Electrodes" icon="puzzle">
-		Conductors at prescribed potentials by the panel method, built from any 2D simgeometry shape.
-	</Card>
-	<Card title="Kernels" icon="setting">
-		Every kernel in Pyccel, NumPy, CUDA and Metal, with the same arguments.
-	</Card>
-</CardGrid>
+- **Flat quadtree.** Point charges (3D Coulomb) or line charges (2D Poisson) at any targets, by Barnes-Hut tree walk or direct sum.
+- **Fast multipole method.** O(N) fields of line charges with a dual-tree traversal and complex multipole expansions.
+- **Simulation.** Second-order time integration with a uniform magnetic field, absorbing walls and objects, and cached fields.
+- **Electrodes.** Conductors at prescribed potentials by the panel method, built from any 2D simgeometry shape.
+- **Kernels.** Every kernel in Pyccel, NumPy, CUDA and Metal, with the same arguments.
 
 ## Start here
 
-<CardGrid>
-	<LinkCard title="Installation" href="/tree-d-3d/getting-started/installation/" description="Create an environment and install the package." />
-	<LinkCard title="Quickstart" href="/tree-d-3d/getting-started/quickstart/" description="Fields from a tree, the FMM or a direct sum, and a simulation." />
-	<LinkCard title="Live demo" href="/tree-d-3d/getting-started/live-demo/" description="Build a quadtree and walk it in your browser." />
-	<LinkCard title="Examples" href="/tree-d-3d/examples/" description="Executed notebooks, and runnable scripts with their figures and animations." />
-	<LinkCard title="API reference" href="/tree-d-3d/api/tree_d_3d/" description="Generated from the docstrings." />
-</CardGrid>
+- [Installation](/tree-d-3d/getting-started/installation/): create an environment and install the package.
+- [Quickstart](/tree-d-3d/getting-started/quickstart/): fields from a tree, the FMM or a direct sum, and a simulation.
+- [Live demo](/tree-d-3d/getting-started/live-demo/): build a quadtree and walk it in your browser.
+- [Examples](/tree-d-3d/examples/): executed notebooks, and runnable scripts with their figures and animations.
+- [API reference](/tree-d-3d/api/tree_d_3d/): generated from the docstrings.
